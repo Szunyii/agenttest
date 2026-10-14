@@ -19,7 +19,10 @@ function requireEnv(name: string): string {
 
 export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
   try {
-    const devMode = process.env.DAILY_EXERCISE_DEV === "1";
+    // Never honour the dev flag in production, where it would bypass the 9 o'clock check.
+    const devMode =
+      process.env.DAILY_EXERCISE_DEV === "1" &&
+      process.env.VERCEL_ENV !== "production";
     const credentials = {
       user: requireEnv("GMAIL_USER"),
       appPassword: requireEnv("GMAIL_APP_PASSWORD"),

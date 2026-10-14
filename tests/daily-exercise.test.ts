@@ -92,6 +92,7 @@ describe("composeEmail", () => {
 
     assert.equal(mail.subject, "Napi matekfeladat – 2026. 10. 15.");
     assert.ok(mail.text.includes("Előző feladat szövege"));
+    assert.ok(mail.text.includes("Megoldás: Előző megoldás"));
     assert.ok(
       mail.text.indexOf("Előző megoldás") <
         mail.text.indexOf("Mai feladat szövege"),
@@ -122,14 +123,19 @@ describe("runDailyExercise", () => {
     assert.deepEqual(saved, [{ date: "2026-10-15", ...today }]);
   });
 
-  it("skips when it is not 9 in Budapest", async () => {
-    const { deps, calls } = fakeDeps({
-      now: new Date("2026-10-15T08:05:00Z"), // 10:05 in Budapest
-    });
+  for (const [now, expected, expectedCalls] of [
+    ["2026-12-01T07:30:00Z", "skipped-hour", []], // 08:30 in Budapest (CET)
+    ["2026-12-01T08:59:00Z", "sent", ["generate", "send", "save"]], // 09:59 (CET)
+    ["2026-07-01T07:59:00Z", "sent", ["generate", "send", "save"]], // 09:59 (CEST)
+    ["2026-07-01T08:00:00Z", "skipped-hour", []], // 10:00 in Budapest (CEST)
+  ] as const) {
+    it(`returns ${expected} at ${now}`, async () => {
+      const { deps, calls } = fakeDeps({ now: new Date(now) });
 
-    assert.equal(await runDailyExercise(deps), "skipped-hour");
-    assert.deepEqual(calls, []);
-  });
+      assert.equal(await runDailyExercise(deps), expected);
+      assert.deepEqual(calls, expectedCalls);
+    });
+  }
 
   it("skips when today's email has already been sent", async () => {
     const { deps, calls } = fakeDeps({
@@ -149,6 +155,17 @@ describe("runDailyExercise", () => {
 
     await assert.rejects(runDailyExercise(deps), /SMTP down/);
     assert.deepEqual(saved, []);
+  });
+
+  it("neither sends nor saves when generating fails", async () => {
+    const { deps, calls } = fakeDeps({
+      generate: async () => {
+        throw new Error("Claude down");
+      },
+    });
+
+    await assert.rejects(runDailyExercise(deps), /Claude down/);
+    assert.deepEqual(calls, []);
   });
 
   it("ignores the hour and the already-sent check in dev mode", async () => {

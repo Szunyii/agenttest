@@ -3,9 +3,12 @@ import { Redis } from "@upstash/redis";
 import type { ExerciseRecord } from "./daily-exercise";
 
 function getRedis(): Redis {
-  const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
-  const token =
-    process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+  const url = (
+    process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
+  )?.trim();
+  const token = (
+    process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
+  )?.trim();
 
   if (!url || !token) {
     throw new Error(

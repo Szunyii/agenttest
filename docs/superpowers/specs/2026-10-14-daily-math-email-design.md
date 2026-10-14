@@ -132,4 +132,4 @@ Környezeti változók a Vercelen:
 ## Megvalósításkor tisztázva
 
 - Az Upstash-integráció `KV_REST_API_*` vagy `UPSTASH_REDIS_REST_*` nevű változókat állít be; a kód mindkettőt olvassa (saját ellenőrzéssel, mert a `Redis.fromEnv()` hiányzó változónál csak figyelmeztet).
-- Helyben az `eve dev` a `.env.local` fájlból olvassa a környezeti változókat; a `.env*` a `.gitignore` szerint nem kerül gitbe.
+- Helyben az `eve dev` a `.env*` fájlokból olvassa a környezeti változókat. A titkos adatok a `.env.development.local`-ba kerülnek, mert a `.env.local`-t az `eve link` és az `eve deploy` felülírja. A `.env*` a `.gitignore` szerint nem kerül gitbe.

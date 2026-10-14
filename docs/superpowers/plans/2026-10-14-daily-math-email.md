@@ -891,7 +891,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 9: Kézi végpontig tartó próba helyben (a felhasználóval)
 
-Ehhez a felhasználó titkos adatai kellenek. Ezeket a végrehajtó nem találja ki, és nem kéri be a chatben: a felhasználó maga írja be a `.env.local` fájlba. A `.env*` a `.gitignore` szerint nem kerül gitbe.
+Ehhez a felhasználó titkos adatai kellenek. Ezeket a végrehajtó nem találja ki, és nem kéri be a chatben: a felhasználó maga írja be a `.env.development.local` fájlba. Ezt az `eve dev` és az `eve eval` a legmagasabb prioritással olvassa, és a Vercel CLI nem írja felül (a `.env.local`-t viszont az `eve link` és az `eve deploy` felülírja a `vercel env pull` miatt). A `.env*` a `.gitignore` szerint nem kerül gitbe.
 
 - [ ] **Step 1: A felhasználó előkészít**
 
@@ -899,7 +899,7 @@ Ehhez a felhasználó titkos adatai kellenek. Ezeket a végrehajtó nem találja
 2. Anthropic API-kulcs.
 3. Upstash Redis adatbázis (a Vercel Marketplace-ről vagy az upstash.com-ról), a REST URL és a token.
 
-- [ ] **Step 2: A felhasználó kitölti a `.env.local`-t a projekt gyökerében**
+- [ ] **Step 2: A felhasználó kitölti a `.env.development.local`-t a projekt gyökerében**
 
 ```
 ANTHROPIC_API_KEY=<Anthropic API-kulcs>
@@ -941,6 +941,13 @@ Expected: kilépési kód 0, `calledTool(get_exercise)` passed. Ha elbukik, jöh
 
 Minden lépés előtt kérdezd meg a felhasználót. A deploy és a környezeti változók beállítása kifelé ható művelet.
 
+- [ ] **Step 0: Vercel CLI** (a felhasználó)
+
+Az `eve link` és az `eve deploy` a `vercel` parancsot hívja, ami jelenleg nincs telepítve, és nem-interaktív módban nem tud bejelentkezni.
+
+Run: `npm i -g vercel@latest && vercel login`
+Expected: a `vercel whoami` kiírja a felhasználó Vercel-nevét.
+
 - [ ] **Step 1: A projekt összekötése**
 
 Kérdezd meg a Vercel-projekt nevét, majd:
@@ -952,19 +959,19 @@ Expected: kilépési kód 0. Ha 2-vel lép ki, futtasd a záró NDJSON-esemény 
 
 Vercel → a projekt → Storage → Upstash for Redis → Connect. Utána:
 
-Run: `npx vercel env ls production`
+Run: `vercel env ls production`
 Expected: megjelenik a `KV_REST_API_URL` és a `KV_REST_API_TOKEN` (vagy az `UPSTASH_REDIS_REST_URL` és az `UPSTASH_REDIS_REST_TOKEN`). Ha más nevek jelennek meg, igazítsd hozzájuk az `agent/lib/exercise-store.ts`-t.
 
 - [ ] **Step 3: Környezeti változók** (a felhasználó gépeli be az értékeket)
 
 ```bash
-npx vercel env add ANTHROPIC_API_KEY production
-npx vercel env add GMAIL_USER production
-npx vercel env add GMAIL_APP_PASSWORD production
-npx vercel env add EXERCISE_RECIPIENTS production
+vercel env add ANTHROPIC_API_KEY production
+vercel env add GMAIL_USER production
+vercel env add GMAIL_APP_PASSWORD production
+vercel env add EXERCISE_RECIPIENTS production
 ```
 
-Az `EXERCISE_RECIPIENTS` értéke a három cím, vesszővel elválasztva. A `DAILY_EXERCISE_DEV`-et éles környezetben NEM szabad beállítani.
+Az `EXERCISE_RECIPIENTS` értéke a három cím, vesszővel elválasztva. A `GMAIL_APP_PASSWORD` mehet szóközökkel is, a kód kiszedi őket. A `DAILY_EXERCISE_DEV`-et éles környezetben NEM szabad beállítani.
 
 - [ ] **Step 4: Deploy**
 

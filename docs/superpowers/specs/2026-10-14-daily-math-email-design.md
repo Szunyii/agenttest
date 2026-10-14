@@ -8,9 +8,11 @@ Az agent minden nap 9:00-kor (Europe/Budapest) e-mailben kiküld egy közepes ne
 
 Minta a feladat stílusára:
 
-> Egy csiga minden nap 4 métert halad felfelé egy fán, éjszaka visszacsúszik 3 métert. Milyen magas a fa, ha a kilencedik napon éri el a tetejét?
+> Egy csiga minden nap 4 métert halad felfelé egy fán, éjszaka visszacsúszik 3 métert. Milyen magas a fa, ha a csiga a kilencedik nap végén éppen felér a tetejére?
 >
 > Megoldás: 8 nap alatt 8 métert jut feljebb, a 9. napon még 4 métert mászik, tehát a fa 12 méter magas.
+
+Az eredeti megfogalmazás („a kilencedik napon éri el a tetejét”) 11 és 12 méter közötti magasságot is megengedne, mert a 8. napon már 11 méterig jut. Ezért pontosítottuk; a generáló prompt ezt a változatot használja mintaként.
 
 ## Nem cél
 
@@ -34,15 +36,16 @@ Minta a feladat stílusára:
 | Fájl | Felelősség |
 |---|---|
 | `agent/agent.ts` | Modell: `anthropic("claude-sonnet-5-5")` |
-| `agent/lib/exercise.ts` *(új)* | `generateExercise({ difficulty, topic })` → `{ difficulty, topic, exercise, solution }`. A `get_exercise` mostani generáló logikája kiemelve, Claude-dal. Új téma: `word_problem`, a fenti csigás példával mint stílusmintával. Megmarad a kódban választott hiányzó paraméter és a véletlen „ötlet” számok. |
+| `agent/lib/exercise.ts` *(új)* | `generateExercise({ difficulty, topic })` → `{ difficulty, topic, exercise, solution }`. A `get_exercise` korábbi generáló logikája kiemelve, Claude-dal. Új téma: `word_problem`, a fenti csigás példával mint stílusmintával és véletlen történet-helyszínnel. Megmarad a kódban választott hiányzó paraméter és a véletlen „ötlet” számok. A prompt sima szöveget kér (nincs Markdown, LaTeX), és „Megoldás:” címke nélküli megoldást. |
 | `agent/tools/get_exercise.ts` | Vékony réteg a `generateExercise` fölött. A leírásban és a `topic` enumban megjelenik a `word_problem`. |
-| `agent/lib/mailer.ts` *(új)* | `sendMail({ bcc, subject, text })` nodemailerrel, Gmail SMTP-n (`GMAIL_USER`, `GMAIL_APP_PASSWORD`). |
-| `agent/lib/exercise-store.ts` *(új)* | `getLast()` / `saveLast(record)`. Egyetlen Redis-kulcs: `daily-exercise:last` (fejlesztői módban `daily-exercise:dev:last`), értéke JSON: `{ date: "YYYY-MM-DD", exercise, solution }`. |
-| `agent/lib/daily-exercise.ts` *(új)* | `runDailyExercise()`: a napi folyamat (lent). |
-| `agent/schedules/daily-exercise-summer.ts` *(új)* | `cron: "0 7 * * *"` (UTC) → `runDailyExercise()` |
-| `agent/schedules/daily-exercise-winter.ts` *(új)* | `cron: "0 8 * * *"` (UTC) → `runDailyExercise()` |
+| `agent/lib/mailer.ts` *(új)* | `sendMail(credentials, { bcc, subject, text })` nodemailerrel, Gmail SMTP-n (`GMAIL_USER`, `GMAIL_APP_PASSWORD`). Rövid SMTP-időkorlátok (10–30 mp); ha a Gmail egy címzettet elutasít, figyelmeztetés kerül a naplóba. |
+| `agent/lib/exercise-store.ts` *(új)* | `createExerciseStore(key)` → `getLast()` / `saveLast(record)`. Egyetlen Redis-kulcs: `daily-exercise:last` (fejlesztői módban `daily-exercise:dev:last`), értéke JSON: `{ date: "YYYY-MM-DD", exercise, solution }`. |
+| `agent/lib/daily-exercise.ts` *(új)* | Tiszta, függőség-injektált mag: budapesti óra/dátum, címlista-feldolgozás, levél összeállítása, `runDailyExercise(deps)` (a napi folyamat, lent). Futásidőben semmit nem importál, ezért Node-dal közvetlenül tesztelhető. |
+| `agent/lib/daily-exercise-job.ts` *(új)* | `runDailyExerciseJob()`: környezeti változók beolvasása, a valódi szolgáltatások bekötése a maghoz, naplózás. |
+| `agent/schedules/daily-exercise-summer.ts` *(új)* | `cron: "0 7 * * *"` (UTC) → `runDailyExerciseJob()` |
+| `agent/schedules/daily-exercise-winter.ts` *(új)* | `cron: "0 8 * * *"` (UTC) → `runDailyExerciseJob()` |
 
-A két schedule-fájl azért kell, mert a Vercel Hobby csomagban egy cron naponta csak egyszer futhat, és a megadott órán belül bárhol elsülhet. Mindkét fájl `run` handlert használ, `waitUntil`-be csomagolva.
+A két schedule-fájl azért kell, mert a Vercel Hobby csomagban egy cron naponta csak egyszer futhat, és a megadott órán belül bárhol elsülhet. Mindkét fájl `async run` handlert használ, amely megvárja a jobot, így egy sikertelen futás a Vercelen is hibás cron-futásként jelenik meg.
 
 ## Napi folyamat (`runDailyExercise`)
 
@@ -83,19 +86,24 @@ Az első napon (nincs előző rekord) az „Az előző feladat megoldása” blo
 | Claude-hiba | Az AI SDK beépített újrapróbálkozása után hiba; nincs küldés, nincs mentés |
 | Küldési hiba | Hiba, nincs mentés. A következő levél az utoljára *kiküldött* feladat megoldását hozza, ezért „előző”, nem „tegnapi” a felirat |
 | Mentési hiba sikeres küldés után | Hiba naplózva. Aznap nincs dupla küldés (a másik cron nem 9 órakor fut), de a következő levélből kimarad az előző megoldás |
+| Elakadó SMTP-kapcsolat | 10–30 mp-es időkorlát után hiba; nincs küldés, nincs mentés |
+
+Minden hiba `[daily-exercise] failed` sorral kerül a naplóba, és a cron-futás a Vercelen is hibásként jelenik meg. Ugyanazon a napon nincs újrapróbálkozás: a másik cron nem 9 órakor fut, így aznap nem megy levél.
 
 ## Fejlesztői mód
 
 `DAILY_EXERCISE_DEV=1` (csak helyben):
 
 - kihagyja a 9 órás és a „ma már ment” ellenőrzést,
-- a `daily-exercise:dev:last` kulcsot használja, hogy ne írja felül az éles állapotot.
+- a `daily-exercise:dev:last` kulcsot használja, hogy ne írja felül az éles állapotot,
+- éles környezetben (`VERCEL_ENV=production`) hatástalan, így véletlen beállítás sem küldhet minden futáskor.
 
 Helyben az `EXERCISE_RECIPIENTS` csak a fejlesztő saját címe.
 
 ## Tesztelés
 
 - `tsc` typecheck.
+- `npm test`: 18 unit teszt a napi logikára (`tests/daily-exercise.test.ts`, Node beépített tesztfuttatója).
 - `evals/get-exercise.eval.ts`: a chatben feltett „adj egy matek példát” üzenetre a modell meghívja a `get_exercise`-t. Ha nem, a következő lépés egy sor az `instructions.md`-ben.
 - Kézi futtatás `eve dev` alatt, fejlesztői módban: `curl -X POST http://localhost:2000/eve/v1/dev/schedules/daily-exercise-summer`; a levél megérkezik a saját címre, a második futás már az előző megoldással kezdődik.
 - Élesben: a deploy utáni első reggel a Vercel logja és a postafiók.
@@ -119,9 +127,9 @@ Környezeti változók a Vercelen:
 | `EXERCISE_RECIPIENTS` | A három cím, vesszővel elválasztva |
 | Upstash Redis REST URL és token | A Marketplace-integráció állítja be |
 
-Új függőségek: `nodemailer`, `@types/nodemailer`, `@upstash/redis`.
+Új függőségek: `nodemailer` 10.0.13 (saját típusokkal, `@types/nodemailer` nem kell), `@upstash/redis` 1.39.0.
 
-## Megvalósításkor ellenőrizendő
+## Megvalósításkor tisztázva
 
-- Pontosan milyen nevű környezeti változókat állít be az Upstash-integráció, és ezeket olvassa-e a `Redis.fromEnv()`.
-- Helyben milyen fájlból olvassa az `eve dev` a környezeti változókat.
+- Az Upstash-integráció `KV_REST_API_*` vagy `UPSTASH_REDIS_REST_*` nevű változókat állít be; a kód mindkettőt olvassa (saját ellenőrzéssel, mert a `Redis.fromEnv()` hiányzó változónál csak figyelmeztet).
+- Helyben az `eve dev` a `.env.local` fájlból olvassa a környezeti változókat; a `.env*` a `.gitignore` szerint nem kerül gitbe.

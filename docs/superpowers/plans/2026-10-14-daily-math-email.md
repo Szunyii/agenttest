@@ -12,6 +12,14 @@ Spec: `docs/superpowers/specs/2026-10-14-daily-math-email-design.md`
 
 **Commitok:** a repóban a felhasználónak sok commitolatlan munkája van. A végrehajtás elején kérdezd meg egyszer, hogy commitolhatsz-e. Ha nem, hagyd ki a „Commit” lépéseket. Ha igen, mindig csak az adott task fájljait add hozzá (`git add <fájlok>`), soha ne `git add -A`-t.
 
+**Állapot (2026-10-14):** az 1–8. task kész a `feature/daily-math-email` ágon. A taskonkénti review-k nyomán a kód több ponton eltér a lenti kódblokkoktól; ezekben a repó kódja a mérvadó:
+
+- **Task 2:** 4 további teszt (összesen 18): az előző megoldás megléte, órahatárok (téli 08:30, 09:59, nyári 10:00), generálási hiba.
+- **Task 3:** szigorúbb prompt: sima szöveg, „Megoldás:” címke nélküli megoldás, egyértelmű csigás példa, véletlen történet-helyszín, témafüggetlen nehézségi utalások.
+- **Task 6:** SMTP-időkorlátok, figyelmeztetés elutasított címzettnél, `||` és `.trim()` a Redis-változóknál.
+- **Task 7:** a schedule-ök `async run() { await runDailyExerciseJob(); }` alakúak, így a hiba a Vercelen is hibás futásként látszik; a `DAILY_EXERCISE_DEV` éles környezetben (`VERCEL_ENV=production`) hatástalan.
+- **Task 8:** az eval-fájl kész, de Anthropic-kulcs nélkül nem futtatható; a futtatás a Task 9 része.
+
 ---
 
 ## Fájlszerkezet
@@ -906,21 +914,26 @@ KV_REST_API_TOKEN=<Upstash REST token>
 - [ ] **Step 3: Dev szerver indítása**
 
 Run (külön terminálban, a felhasználó indítja): `npm run dev`
-Expected: a dev szerver fut a `http://localhost:2000` címen, a logban nincs `Missing environment variable` hiba.
+Expected: a dev szerver fut a `http://localhost:2000` címen. A környezeti változókat csak a schedule futása ellenőrzi, ezért induláskor nem jelez hiányt.
 
 - [ ] **Step 4: A schedule kézi indítása**
 
-Run: `curl -s -X POST http://localhost:2000/eve/v1/dev/schedules/daily-exercise-summer`
-Expected: JSON válasz `"scheduleId":"daily-exercise-summer"` mezővel. A dev szerver logjában `[daily-exercise] sent`. A felhasználó postafiókjába megérkezik a `Napi matekfeladat – <mai dátum>` levél, előző-blokk nélkül.
+Run: `curl -si -X POST http://localhost:2000/eve/v1/dev/schedules/daily-exercise-summer`
+Expected: `HTTP/1.1 200` és `{"scheduleId":"daily-exercise-summer","sessionIds":[]}` (a job nem indít agent-sessiont, ezért üres a lista). A dev szerver logjában `[daily-exercise] sent`. A felhasználó postafiókjába megérkezik a `Napi matekfeladat – <mai dátum>` levél, előző-blokk nélkül. Hiba esetén a válasz HTTP 500, és a logban `[daily-exercise] failed` áll a hibaüzenettel.
 
 - [ ] **Step 5: Második futtatás**
 
-Run: `curl -s -X POST http://localhost:2000/eve/v1/dev/schedules/daily-exercise-summer`
-Expected: második levél, amely „Az előző feladat megoldása” blokkal kezdődik, és abban az első levél feladata és megoldása áll.
+Run: `curl -si -X POST http://localhost:2000/eve/v1/dev/schedules/daily-exercise-summer`
+Expected: HTTP 200, és egy második levél, amely „Az előző feladat megoldása” blokkal kezdődik, abban az első levél feladatával és megoldásával. A megoldás előtt csak egyszer szerepel a „Megoldás:” címke, és a szövegben nincs Markdown vagy LaTeX.
 
 - [ ] **Step 6: Chat-próba**
 
 A dev chatben: „adj egy szöveges matek feladatot”. Expected: a válasz egy szöveges feladat, megoldás nélkül, és a trace-ben `get_exercise` hívás `topic: "word_problem"` bemenettel.
+
+- [ ] **Step 7: Az eval futtatása (a Task 8-ból)**
+
+Run: `npx eve eval get-exercise`
+Expected: kilépési kód 0, `calledTool(get_exercise)` passed. Ha elbukik, jöhet a Task 8 Step 3 (egy sor az `instructions.md`-be), majd újrafuttatás.
 
 ---
 
@@ -962,6 +975,10 @@ Expected: kilépési kód 0 és egy production URL.
 
 Vercel → a projekt → Settings → Cron Jobs. Expected: két job, `0 7 * * *` és `0 8 * * *`.
 
-- [ ] **Step 6: Első éles reggel**
+- [ ] **Step 6: Futásidő-korlát**
+
+Vercel → a projekt → Settings → Functions. Expected: a Fluid Compute be van kapcsolva (alapértelmezett maximális futásidő 300 mp). Ha ki van kapcsolva, és a korlát csak 10 mp, a job (Redis, Claude, SMTP) félbeszakadhat: kapcsold be, vagy emeld a korlátot.
+
+- [ ] **Step 7: Első éles reggel**
 
 Másnap 9:00 és 10:00 között: Vercel → Observability → Logs. Expected: egy `[daily-exercise] sent` és egy `[daily-exercise] skipped-hour` sor, és a három címzett megkapta a levelet.

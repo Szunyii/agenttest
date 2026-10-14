@@ -25,7 +25,8 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       process.env.VERCEL_ENV !== "production";
     const credentials = {
       user: requireEnv("GMAIL_USER"),
-      appPassword: requireEnv("GMAIL_APP_PASSWORD"),
+      // Google shows App Passwords in groups of four separated by spaces.
+      appPassword: requireEnv("GMAIL_APP_PASSWORD").replace(/\s+/g, ""),
     };
     const recipients = parseRecipients(requireEnv("EXERCISE_RECIPIENTS"));
     // Dev runs use their own key so local tests never overwrite the live state.

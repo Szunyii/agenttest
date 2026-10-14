@@ -1,6 +1,7 @@
+import { anthropic } from "eve/models/anthropic";
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-6-luna-fast",
+  model: anthropic("claude-sonnet-5-5"),
   reasoning: "high",
 });

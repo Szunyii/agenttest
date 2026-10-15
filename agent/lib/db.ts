@@ -20,6 +20,8 @@ export function getPrisma(): PrismaClient {
         // Supabase's pooler strings carry no sslmode, so force TLS. The
         // pooler's CA is not in Node's trust store, so it is not verified.
         ssl: { rejectUnauthorized: false },
+        // Without it, pg waits for the OS TCP timeout if the pooler is unreachable.
+        connectionTimeoutMillis: 10_000,
       }),
     });
   }

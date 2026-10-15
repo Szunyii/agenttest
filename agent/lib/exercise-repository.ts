@@ -8,8 +8,14 @@ import { getPrisma } from "./db";
 
 export type Environment = "production" | "development";
 
-// The mailer's SMTP timeouts allow up to ~40 s; Prisma's default is 5 s.
-const transactionTimeoutMs = 60_000;
+// Must exceed the slowest send: DNS 10 s + connect 10 s per resolved address +
+// greeting 10 s + a 30 s socket stall ≈ 70 s. If it fired mid-send, the mail
+// could go out while the insert is rolled back. It stays below Supabase's 2 min
+// statement cap, so a parallel run waiting on the slot still gets P2002.
+const transactionTimeoutMs = 90_000;
+// The pooled connection has usually gone idle during generation, so the
+// transaction opens a fresh TLS connection; Prisma's 2 s default is tight.
+const transactionMaxWaitMs = 10_000;
 
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -72,7 +78,7 @@ export function createExerciseRepository(
             });
             await send(mail);
           },
-          { timeout: transactionTimeoutMs },
+          { timeout: transactionTimeoutMs, maxWait: transactionMaxWaitMs },
         );
 
         return "sent";

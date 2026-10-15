@@ -3,8 +3,8 @@ import {
   runDailyExercise,
   type DailyExerciseResult,
 } from "./daily-exercise";
-import { createExerciseStore } from "./exercise-store";
 import { generateExercise } from "./exercise";
+import { createExerciseRepository } from "./exercise-repository";
 import { sendMail } from "./mailer";
 
 function requireEnv(name: string): string {
@@ -29,20 +29,20 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       appPassword: requireEnv("GMAIL_APP_PASSWORD").replace(/\s+/g, ""),
     };
     const recipients = parseRecipients(requireEnv("EXERCISE_RECIPIENTS"));
-    // Dev runs use their own key so local tests never overwrite the live state.
-    const store = createExerciseStore(
-      devMode ? "daily-exercise:dev:last" : "daily-exercise:last",
+    requireEnv("DATABASE_URL");
+    const repository = createExerciseRepository(
+      devMode ? "development" : "production",
+      (mail) => sendMail(credentials, mail),
     );
 
     const result = await runDailyExercise({
       now: new Date(),
       devMode,
       recipients,
+      getPrevious: repository.getPrevious,
       generate: () =>
         generateExercise({ difficulty: "medium", topic: "word_problem" }),
-      send: (mail) => sendMail(credentials, mail),
-      getLast: store.getLast,
-      saveLast: store.saveLast,
+      deliver: repository.deliver,
     });
 
     console.log(`[daily-exercise] ${result}`);

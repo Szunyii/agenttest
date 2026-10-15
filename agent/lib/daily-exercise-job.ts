@@ -3,12 +3,13 @@ import {
   runDailyExercise,
   type DailyExerciseResult,
 } from "./daily-exercise";
+import { disconnectPrisma } from "./db";
 import { generateExercise } from "./exercise";
 import { createExerciseRepository } from "./exercise-repository";
 import { sendMail } from "./mailer";
 
 function requireEnv(name: string): string {
-  const value = process.env[name];
+  const value = process.env[name]?.trim();
 
   if (!value) {
     throw new Error(`Missing environment variable: ${name}`);
@@ -51,5 +52,11 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
   } catch (error) {
     console.error("[daily-exercise] failed", error);
     throw error;
+  } finally {
+    // A once-a-day job gains nothing from pooling, and an idle socket left open
+    // could go stale while a Fluid Compute instance is suspended.
+    await disconnectPrisma().catch((error) =>
+      console.warn("[daily-exercise] disconnect failed", error),
+    );
   }
 }

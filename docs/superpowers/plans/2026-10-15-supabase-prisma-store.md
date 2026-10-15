@@ -21,6 +21,14 @@ Előzmény: `docs/superpowers/plans/2026-10-14-daily-math-email.md` (a jelenlegi
 
 **Git:** a munka a `feature/supabase-prisma-store` ágon folyik. Taskonként csak a felsorolt fájlokat add hozzá (`git add <fájlok>`), soha ne `git add -A`-t. A felhasználó commitolatlan munkája maradjon érintetlen: `agent/instructions.md`, `agent/skills/`, `agent/tools/get_weather.ts`, `greeting.ts`, `web_search.ts`, `apps/`, `evals/current-weather.eval.ts`, `evals/evals.config.ts`, `skills-lock.json`.
 
+**Állapot (2026-10-15):** az 1–5. task és a záró review javításai (`4c6377a`) készen vannak. A review-k nyomán a kód több ponton eltér a lenti kódblokkoktól; ezekben a repó kódja a mérvadó:
+
+- **Task 1:** a `prisma.config.ts` csak a hiányzó fájlt (`ENOENT`) nyeli le; `/generated` a `.gitignore`-ban és a `.vercelignore`-ban; a `tsconfig.json` a `prisma.config.ts`-t is ellenőrzi; a migráció a `_prisma_migrations` táblán is bekapcsolja az RLS-t.
+- **Task 2:** 5 további teszt (összesen 24), köztük a `resolveRunMode`; a `composeEmail` csak a mai feladat szövegét kapja meg.
+- **Task 3–4:** futásonként saját Prisma-kliens (`createPrisma()`, a repository első paramétere), lezárás a job `finally` ágában; 90 mp-es tranzakciós korlát, 10 mp-es `maxWait` és kapcsolódási korlát; TLS ellenőrzés nélkül.
+- **Környezet:** éles (`production`) sort csak a Vercel éles deployja ír (`VERCEL_ENV=production`), minden más futás `development`; az egyediség `@@unique([environment, slot])`.
+- **Generálás:** 120 mp-es időkorlát a Claude-hívásra.
+
 ---
 
 ## Fájlszerkezet
@@ -832,6 +840,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 A titkos adatokat a felhasználó írja be a `.env.development.local`-ba; a végrehajtó nem kéri be a chatben.
 
+- [ ] **Step 0: A projekt** (a felhasználó)
+
+A projekt a felhasználó saját, ingyenes szervezetében legyen, ne a céges (FutureDigital) szervezetben; a Supabase felülete alapból az utoljára használt szervezetet ajánlja. Régiónak a Frankfurt (`eu-central-1`) a javasolt, a Vercel `fra1` régiójához illik. Az adatbázis-jelszót a projekt létrehozásakor el kell menteni. Az URI-ban a `[YOUR-PASSWORD]` helyére a jelszó kerül, a szögletes zárójelekkel együtt cserélve. Ha a jelszóban `@ # / ? %` karakter van, azt URL-kódolni kell (pl. `#` → `%23`); egy kódolatlan `#` a `.env` fájlt is elrontja.
+
 - [ ] **Step 1: A felhasználó kitölti a `.env.development.local`-t**
 
 A Supabase-projektben: **Connect** → **Connection string**, a „Transaction pooler” és a „Session pooler” sima URI-ja, a jelszóval kiegészítve. A Prisma-fül változata `?pgbouncer=true`-t tesz a végére, ami a `pg` illesztőnek nem kell. A `DATABASE_URL` ne tartalmazzon `sslmode` paramétert: az felülírná a `db.ts` TLS-beállítását, és a `require` értéket a `pg` teljes tanúsítvány-ellenőrzésként értelmezné, ami a Supabase poolerén elbukik.
@@ -853,7 +865,7 @@ Expected: `1 migration found` és `All migrations have been successfully applied
 
 - [ ] **Step 3: Ellenőrzés**
 
-Supabase → Table Editor: van `daily_exercises` (0 sor) és `_prisma_migrations` (1 sor) tábla, mindkettőn „RLS enabled” jelzéssel. Supabase → Advisors → Security: egyik táblára sincs „RLS disabled in public” figyelmeztetés.
+Supabase → Table Editor: van `daily_exercises` (0 sor) és `_prisma_migrations` (1 sor) tábla, és egyiken sincs piros „Unrestricted” jelzés. Supabase → Advisors → Security: egyik táblára sincs „RLS Disabled in Public” hiba. Egy-egy „RLS Enabled No Policy” INFO-bejegyzés várható mindkét táblára; ez a szándékolt állapot, szabályt ne adj hozzá.
 
 Supabase → SQL Editor: `SHOW idle_in_transaction_session_timeout;`. Expected: `0`, vagy legalább 90 másodperc. A tranzakció a levélküldés alatt tétlen, és egy rövidebb korlát megszakítaná.
 
@@ -865,7 +877,9 @@ Opcionális: mivel az adatbázist csak a Prisma használja, a Supabase nyilváno
 
 - [ ] **Step 1: Dev szerver**
 
-Run (a felhasználó, külön terminálban): `npm run dev`
+Run (a felhasználó, külön terminálban): `npm run dev -- --logs all`
+
+A `--logs all` kell: alapból az `eve dev` csak a súlyossággal jelölt hibákat mutatja, a `[daily-exercise] …` sorokat nem, és a `curl` minden kimenetelre (`sent`, `skipped-hour`, `already-sent`) HTTP 200-at ad. A TUI-ban a `/loglevel all` vagy a `Ctrl+L` ugyanezt teszi. Helyi futás sosem ír éles (`production`) sort, így a valódi címzettek napi levelét nem veszélyezteti.
 
 - [ ] **Step 2: Első futás**
 
@@ -906,7 +920,7 @@ vercel env add CRON_SECRET production
 
 Az `EXERCISE_RECIPIENTS` a három cím vesszővel. A `CRON_SECRET` egy hosszú véletlen érték (pl. `openssl rand -hex 32`): ha be van állítva, a cron-végpont csak a Vercel saját hívását fogadja el. A `DIRECT_URL` és a `DAILY_EXERCISE_DEV` NEM kell élesben.
 
-- [ ] **Step 4: Deploy:** `npx eve deploy --non-interactive --yes` → kilépési kód 0. Figyelem: az `eve deploy` a munkakönyvtárat tölti fel, a felhasználó commitolatlan fájljaival együtt (pl. `agent/instructions.md`). A Vercelen futó build előkészíti a sandboxot („initializing 1 sandbox template”); ha ez elbukik, a deploy is leáll, és a hibaüzenet a sandboxról szól, nem az adatbázisról.
+- [ ] **Step 4: Deploy:** `npx eve deploy --non-interactive --yes` → kilépési kód 0. Figyelem: az `eve deploy` a munkakönyvtárat tölti fel, a felhasználó commitolatlan fájljaival együtt (pl. `agent/instructions.md`, `agent/skills/`, a `get_weather` és `greeting` tool). Ha ezeket nem akarod élesbe vinni, előtte `git stash -u`, a deploy után `git stash pop`. A Vercelen futó build előkészíti a sandboxot („initializing 1 sandbox template”); ha ez elbukik, a deploy is leáll, és a hibaüzenet a sandboxról szól, nem az adatbázisról.
 - [ ] **Step 5: Ellenőrzés:** Vercel → Settings → Cron Jobs: `0 7 * * *` és `0 8 * * *`; Settings → Functions: Fluid Compute bekapcsolva, a Max Duration legalább 300 mp (a job legrosszabb esetben a Claude-generálás plusz 90 mp tranzakció), és a Function Region a Supabase-projekt régiójához közel van (pl. EU-s Supabase esetén `fra1`). Az alapértelmezett `iad1` (USA) minden adatbázis-kéréshez nagyjából 90 ms-ot ad.
-- [ ] **Step 6: Első éles reggel:** 9:00 és 10:00 között a Vercel logjában egy `[daily-exercise] sent` és egy `skipped-hour`; a címzettek megkapták a levelet; a táblában egy `production` sor a mai dátummal.
+- [ ] **Step 6: Első éles reggel:** a levél 9:00 és 9:59 között érkezik, a Vercel logjában `[daily-exercise] sent`. A másik cron `skipped-hour`-t naplóz: nyári időszámítás alatt (október 25-ig) 10:00 és 10:59 között, télen 8:00 és 8:59 között; a címzettek megkapták a levelet; a táblában egy `production` sor a mai dátummal.
 - [ ] **Step 7: Szüneteltetés figyelése:** az első héten ellenőrizd a Supabase-ben, hogy a projekt nem került „Paused” állapotba.

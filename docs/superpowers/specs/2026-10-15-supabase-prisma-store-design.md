@@ -21,7 +21,8 @@ A napi feladat tárolása az Upstash Redis helyett egy Supabase Postgres-adatbá
 | Megközelítés | Prisma interaktív tranzakció (`$transaction`) | Egyszerű, közvetlenül a Prisma garantálja |
 | Adatbázis | A felhasználó saját, ingyenes Supabase-szervezetének új projektje | Elkülönül az éles terméktől; ingyenes |
 | Prisma | 7.10.0, `@prisma/adapter-pg` illesztővel | Supabase-hez a Prisma 7 ezt használja |
-| Duplikáció elleni védelem | Egyedi `slot` mező | Atomikus; a korábbi „ritkán dupla küldés” kockázatot is megszünteti |
+| Duplikáció elleni védelem | Környezeten belül egyedi `slot` (`@@unique([environment, slot])`) | Atomikus; a korábbi „ritkán dupla küldés” kockázatot is megszünteti |
+| Környezet | `production` csak a Vercel éles deployján (`VERCEL_ENV=production`), minden más futás `development` | Egy helyi futás így sosem foglalhatja le a valódi címzettek napi levelét |
 | Upstash Redis | Kikerül | A Supabase kiváltja |
 
 ## Adatmodell
@@ -31,8 +32,8 @@ Tábla: `daily_exercises` (Prisma-modell: `DailyExercise`).
 | Mező | Típus | Tartalom |
 |---|---|---|
 | `id` | egész, automatikus | azonosító |
-| `environment` | enum: `production`, `development` | melyik környezet futása |
-| `slot` | szöveg, **egyedi** | élesben a budapesti dátum (`2026-10-15`), fejlesztéskor ISO időbélyeg |
+| `environment` | enum: `production`, `development` | melyik környezet futása (lásd Döntések) |
+| `slot` | szöveg, a környezeten belül **egyedi** | a budapesti dátum (`2026-10-15`), fejlesztői módban ISO időbélyeg |
 | `date` | `date` | a budapesti dátum |
 | `difficulty` | szöveg | pl. `medium` |
 | `topic` | szöveg | pl. `word_problem` |
@@ -40,7 +41,7 @@ Tábla: `daily_exercises` (Prisma-modell: `DailyExercise`).
 | `solution` | szöveg | a megoldás (címke nélkül) |
 | `createdAt` | időbélyeg, alapértelmezés: most | a mentés ideje |
 
-A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supabase a `public` séma tábláit nyilvános REST API-n is elérhetővé teszi. A Prisma adatbázis-tulajdonosként kapcsolódik, így őt ez nem érinti.
+A migráció bekapcsolja az RLS-t a `daily_exercises` és a Prisma saját `_prisma_migrations` tábláján, szabályok nélkül, mert a Supabase a `public` séma tábláit nyilvános REST API-n is elérhetővé teszi. A Prisma adatbázis-tulajdonosként kapcsolódik, így őt ez nem érinti.
 
 ## Felépítés
 
@@ -49,10 +50,11 @@ A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supaba
 | `prisma/schema.prisma` | *új*: a `DailyExercise` modell és az `Environment` enum; generátor: `prisma-client`, a projekt gyökerében lévő, gitből kizárt mappába |
 | `prisma.config.ts` | *új*: Prisma 7 konfiguráció; a CLI a `DIRECT_URL`-t használja, helyben a `.env.development.local`-ból |
 | `prisma/migrations/` | *új*: a tábla és az RLS bekapcsolása |
-| `agent/lib/db.ts` | *új*: Prisma-kliens a `@prisma/adapter-pg` illesztővel, `DATABASE_URL` alapján |
-| `agent/lib/exercise-repository.ts` | *új*: `createExerciseRepository(environment, send)` → `getPrevious()` és `deliver(record, mail)` |
-| `agent/lib/daily-exercise.ts` | módosul: a `saveLast` + `send` helyett egy `deliver` lépés; a `slot` itt számolódik |
-| `agent/lib/daily-exercise-job.ts` | módosul: a repository bekötése, `DATABASE_URL` ellenőrzése |
+| `agent/lib/db.ts` | *új*: `createPrisma()`, futásonként saját Prisma-kliens a `@prisma/adapter-pg` illesztővel, `DATABASE_URL` alapján. Közös kliensnél egy futás lezárása (`$disconnect()`) visszagörgethetné egy párhuzamos futás tranzakcióját |
+| `agent/lib/exercise-repository.ts` | *új*: `createExerciseRepository(prisma, environment, send)` → `getPrevious()` és `deliver(record, mail)` |
+| `agent/lib/daily-exercise.ts` | módosul: a `saveLast` + `send` helyett egy `deliver` lépés; a `slot` itt számolódik; `resolveRunMode` a környezethez és a fejlesztői módhoz |
+| `agent/lib/daily-exercise-job.ts` | módosul: a repository bekötése saját klienssel, lezárás a végén |
+| `agent/lib/exercise.ts` | módosul: 120 mp-es időkorlát a Claude-hívásra |
 | `agent/lib/exercise-store.ts` | *törlés* |
 | `package.json` | `prisma` (dev), `@prisma/client`, `@prisma/adapter-pg` 7.10.0 (a `pg`-t az illesztő hozza); `postinstall: prisma generate`; a `@upstash/redis` kikerül |
 
@@ -61,7 +63,8 @@ A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supaba
 - `getPrevious(): Promise<ExerciseRecord | null>`: a környezet utoljára mentett feladata.
 - `generate(): Promise<GeneratedExercise>`: `{ difficulty, topic, exercise, solution }`.
 - `deliver(record: NewExerciseRecord, mail: OutgoingMail): Promise<"sent" | "already-sent">`: mentés és küldés egy tranzakcióban.
-- A `slot` élesben a budapesti dátum, fejlesztői módban `now.toISOString()`.
+- A `slot` a budapesti dátum, fejlesztői módban `now.toISOString()`.
+- `resolveRunMode(env)`: `production` csak `VERCEL_ENV=production` esetén; a fejlesztői mód csak `development` környezetben és `DAILY_EXERCISE_DEV=1` mellett.
 - Az eredmény: `"sent" | "skipped-hour" | "already-sent"`.
 
 ## Napi folyamat
@@ -72,23 +75,23 @@ A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supaba
 4. `generate()`: Claude írja a feladatot, az adatbázison kívül.
 5. `deliver()`: egy tranzakcióban (90 mp-es korláttal, ami hosszabb a leglassabb, kb. 70 mp-es levélküldésnél) beszúrja a sort, majd elküldi a levelet. Ha a beszúrás egyedi-megkötés hibával (`P2002`) bukik el, `already-sent`, levél nélkül.
 6. Sikeres lezárás: `sent`.
-7. A futás végén (hiba esetén is) a job lezárja az adatbázis-kapcsolatot, mert napi egy futásnál a nyitva tartott kapcsolat nem hoz semmit, és a Fluid Compute felfüggesztése alatt elavulhat.
+7. A futás végén (hiba esetén is) a job lezárja a saját adatbázis-kliensét, mert napi egy futásnál a nyitva tartott kapcsolat nem hoz semmit, és a Fluid Compute felfüggesztése alatt elavulhat.
 
 ## Hibakezelés
 
 | Hiba | Viselkedés |
 |---|---|
 | Az adatbázis nem érhető el (pl. szüneteltetett ingyenes projekt) | Hiba a 3. lépésnél; nincs generálás, nincs levél |
-| Claude-hiba | Nincs mentés, nincs levél |
+| Claude-hiba vagy 120 mp-nél hosszabb generálás | Nincs mentés, nincs levél |
 | Küldési hiba | A tranzakció visszagörgetődik; nincs mentés |
 | Párhuzamos futás már beszúrta a mai sort | `already-sent`, levél nélkül |
-| A levél kiment, de a lezárás elbukik | Ritka; a levél nem mentődik, a következő levélből kimarad az előző megoldás |
+| A levél kiment, de a lezárás elbukik | Ritka; a levél nem mentődik, ezért a következő levél nem ennek, hanem az eggyel korábbi, már megoldott feladatnak a megoldását ismétli |
 
 Minden hiba `[daily-exercise] failed` sorral kerül a naplóba, és a cron-futás a Vercelen hibásként látszik.
 
 ## Tesztelés
 
-- Unit tesztek a magra: a meglévők az új `deliver` szerződéshez igazítva, plusz: generálási hibánál nincs `deliver`; a `deliver` `already-sent` eredménye visszajut; a `slot` élesben a dátum, fejlesztéskor időbélyeg.
+- Unit tesztek a magra (24): a meglévők az új `deliver` szerződéshez igazítva, plusz: generálási hibánál nincs `deliver`; a `deliver` `already-sent` eredménye visszajut; a `slot` élesben a dátum, fejlesztéskor időbélyeg; az első levél előző-blokk nélkül; a mai megoldás nem kerül a levélbe; a `resolveRunMode` négy esete.
 - `eve info` és helyi `eve build --skip-sandbox-prewarm` (helyben nincs sandbox-szolgáltató; ez csak a csomagolást ellenőrzi): az eve fordítója becsomagolja-e a Prisma 7 klienst.
 - Kézi próba helyben (fejlesztői mód): két futás, a második az első megoldásával kezdődik; egy futás szándékosan rossz App Password-del, utána nincs új sor a táblában.
 

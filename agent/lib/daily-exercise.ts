@@ -5,8 +5,15 @@ export interface ExerciseRecord {
 }
 
 export interface GeneratedExercise {
+  difficulty: string;
+  topic: string;
   exercise: string;
   solution: string;
+}
+
+export interface NewExerciseRecord extends GeneratedExercise {
+  slot: string;
+  date: string;
 }
 
 export interface OutgoingMail {
@@ -15,17 +22,21 @@ export interface OutgoingMail {
   text: string;
 }
 
+export type DeliveryResult = "sent" | "already-sent";
+
 export interface DailyExerciseDeps {
   now: Date;
   devMode: boolean;
   recipients: string[];
+  getPrevious: () => Promise<ExerciseRecord | null>;
   generate: () => Promise<GeneratedExercise>;
-  send: (mail: OutgoingMail) => Promise<void>;
-  getLast: () => Promise<ExerciseRecord | null>;
-  saveLast: (record: ExerciseRecord) => Promise<void>;
+  deliver: (
+    record: NewExerciseRecord,
+    mail: OutgoingMail,
+  ) => Promise<DeliveryResult>;
 }
 
-export type DailyExerciseResult = "sent" | "skipped-hour" | "already-sent";
+export type DailyExerciseResult = DeliveryResult | "skipped-hour";
 
 const timeZone = "Europe/Budapest";
 const sendHour = 9;
@@ -101,24 +112,18 @@ export async function runDailyExercise(
     return "skipped-hour";
   }
 
-  const previous = await deps.getLast();
+  const previous = await deps.getPrevious();
 
   if (!deps.devMode && previous?.date === clock.date) {
     return "already-sent";
   }
 
   const today = await deps.generate();
+  // Production allows one email per day; every dev run gets its own slot.
+  const slot = deps.devMode ? deps.now.toISOString() : clock.date;
 
-  await deps.send({
-    bcc: deps.recipients,
-    ...composeEmail(previous, today, clock.date),
-  });
-  // Save only after a successful send, so a failed day never hides a solution.
-  await deps.saveLast({
-    date: clock.date,
-    exercise: today.exercise,
-    solution: today.solution,
-  });
-
-  return "sent";
+  return deps.deliver(
+    { slot, date: clock.date, ...today },
+    { bcc: deps.recipients, ...composeEmail(previous, today, clock.date) },
+  );
 }

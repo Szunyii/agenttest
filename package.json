@@ -14,10 +14,13 @@
     "start": "eve start",
     "typecheck": "tsc",
     "test": "node --test \"tests/**/*.test.ts\"",
+    "postinstall": "prisma generate",
     "dev:web": "next dev apps/web",
     "build:web": "next build apps/web"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@shadcn/react": "^0.3.1",
     "@shikijs/core": "^3.23.0",
@@ -54,6 +57,7 @@
     "@types/node": "^26.6.4",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
+    "prisma": "7.10.0",
     "typescript": "^6.0.3"
   },
   "engines": {

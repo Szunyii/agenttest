@@ -1,0 +1,30 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Environment {
+  production
+  development
+}
+
+model DailyExercise {
+  id          Int         @id @default(autoincrement())
+  environment Environment
+  // Production: the Budapest date (one email per day). Dev: an ISO timestamp.
+  slot        String      @unique
+  date        DateTime    @db.Date
+  difficulty  String
+  topic       String
+  exercise    String
+  solution    String
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@index([environment, createdAt])
+  @@map("daily_exercises")
+}

@@ -76,7 +76,7 @@ export function parseRecipients(value: string): string[] {
 
 export function composeEmail(
   previous: ExerciseRecord | null,
-  today: GeneratedExercise,
+  today: Pick<GeneratedExercise, "exercise">,
   date: string,
 ): { subject: string; text: string } {
   const [year, month, day] = date.split("-");
@@ -114,6 +114,8 @@ export async function runDailyExercise(
 
   const previous = await deps.getPrevious();
 
+  // Only saves a Claude call: `deliver` is authoritative via the unique slot,
+  // which equals the date in production.
   if (!deps.devMode && previous?.date === clock.date) {
     return "already-sent";
   }
@@ -123,7 +125,7 @@ export async function runDailyExercise(
   const slot = deps.devMode ? deps.now.toISOString() : clock.date;
 
   return deps.deliver(
-    { slot, date: clock.date, ...today },
+    { ...today, slot, date: clock.date },
     { bcc: deps.recipients, ...composeEmail(previous, today, clock.date) },
   );
 }

@@ -133,6 +133,15 @@ describe("runDailyExercise", () => {
     assert.deepEqual(delivered[0].mail.bcc, ["a@example.com", "b@example.com"]);
     assert.ok(delivered[0].mail.text.includes("Megoldás: Előző megoldás"));
     assert.ok(delivered[0].mail.text.includes("Mai feladat szövege"));
+    assert.ok(!delivered[0].mail.text.includes("Mai megoldás"));
+  });
+
+  it("sends the first email without a previous block", async () => {
+    const { deps, delivered } = fakeDeps({ getPrevious: async () => null });
+
+    assert.equal(await runDailyExercise(deps), "sent");
+    assert.ok(!delivered[0].mail.text.includes("Az előző feladat megoldása"));
+    assert.ok(delivered[0].mail.text.includes("Mai feladat szövege"));
   });
 
   for (const [now, expected, expectedCalls] of [
@@ -197,5 +206,6 @@ describe("runDailyExercise", () => {
     assert.equal(await runDailyExercise(deps), "sent");
     assert.equal(delivered[0].record.slot, "2026-10-15T12:00:00.000Z");
     assert.equal(delivered[0].record.date, "2026-10-15");
+    assert.ok(delivered[0].mail.text.includes("Megoldás: Előző megoldás"));
   });
 });

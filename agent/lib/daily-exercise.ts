@@ -42,8 +42,16 @@ export type Environment = "production" | "development";
 
 export function resolveRunMode(env: {
   DAILY_EXERCISE_DEV?: string;
+  VERCEL?: string;
   VERCEL_ENV?: string;
 }): { environment: Environment; devMode: boolean } {
+  if (env.VERCEL === "1" && !env.VERCEL_ENV) {
+    // Without it a production cron would silently run as development.
+    throw new Error(
+      "VERCEL_ENV is missing on Vercel; enable 'Automatically expose System Environment Variables'.",
+    );
+  }
+
   // Only a Vercel production deployment writes production rows, so a local run
   // can never use up the real recipients' daily slot.
   const environment: Environment =

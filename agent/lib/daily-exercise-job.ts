@@ -45,7 +45,7 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       deliver: repository.deliver,
     });
 
-    console.log(`[daily-exercise] ${result}`);
+    console.log(`[daily-exercise] ${environment}: ${result}`);
 
     return result;
   } catch (error) {

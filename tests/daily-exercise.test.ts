@@ -125,6 +125,10 @@ describe("resolveRunMode", () => {
       devMode: true,
     });
   });
+
+  it("refuses to guess the environment on Vercel without VERCEL_ENV", () => {
+    assert.throws(() => resolveRunMode({ VERCEL: "1" }), /VERCEL_ENV/);
+  });
 });
 
 describe("composeEmail", () => {

@@ -16,7 +16,7 @@ enum Environment {
 model DailyExercise {
   id          Int         @id @default(autoincrement())
   environment Environment
-  // Production: the Budapest date (one email per day). Dev: an ISO timestamp.
+  // The Budapest date (one email per day per environment); in dev mode an ISO timestamp.
   slot        String
   date        DateTime    @db.Date
   difficulty  String

@@ -1,5 +1,7 @@
 # Napi matekfeladat e-mailben – terv
 
+> **2026-10-15:** a tárolás Upstash Redisről Supabase + Prismára változott („minden vagy semmi” tranzakció). Lásd `docs/superpowers/specs/2026-10-15-supabase-prisma-store-design.md` és `docs/superpowers/plans/2026-10-15-supabase-prisma-store.md`. Az Upstash-ra és a `KV_*` változókra vonatkozó részek elavultak.
+
 Dátum: 2026-10-14
 
 ## Cél

@@ -38,6 +38,25 @@ export interface DailyExerciseDeps {
 
 export type DailyExerciseResult = DeliveryResult | "skipped-hour";
 
+export type Environment = "production" | "development";
+
+export function resolveRunMode(env: {
+  DAILY_EXERCISE_DEV?: string;
+  VERCEL_ENV?: string;
+}): { environment: Environment; devMode: boolean } {
+  // Only a Vercel production deployment writes production rows, so a local run
+  // can never use up the real recipients' daily slot.
+  const environment: Environment =
+    env.VERCEL_ENV === "production" ? "production" : "development";
+
+  return {
+    environment,
+    // The dev flag is never honoured in production, where it would bypass the
+    // 9 o'clock check.
+    devMode: environment === "development" && env.DAILY_EXERCISE_DEV === "1",
+  };
+}
+
 const timeZone = "Europe/Budapest";
 const sendHour = 9;
 

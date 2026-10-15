@@ -15,6 +15,9 @@ export type Difficulty = (typeof difficulties)[number];
 export type Topic = (typeof topics)[number];
 
 const model = "claude-sonnet-5-5";
+// Bounds a stalled Claude call so the daily job stays well inside the
+// function's max duration (generation + a 90 s transaction < 300 s).
+const generationTimeoutMs = 120_000;
 
 const difficultyHints: Record<Difficulty, string> = {
   easy: "one or two simple steps with small whole numbers",
@@ -80,6 +83,7 @@ export async function generateExercise(input: {
 
   const { output } = await generateText({
     model: anthropic(model),
+    abortSignal: AbortSignal.timeout(generationTimeoutMs),
     output: Output.object({
       schema: exerciseSchema.pick({ exercise: true, solution: true }),
     }),

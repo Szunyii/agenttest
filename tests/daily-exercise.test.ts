@@ -5,6 +5,7 @@ import {
   budapestClock,
   composeEmail,
   parseRecipients,
+  resolveRunMode,
   runDailyExercise,
   type DailyExerciseDeps,
   type ExerciseRecord,
@@ -89,6 +90,40 @@ describe("parseRecipients", () => {
 
   it("throws when no address is given", () => {
     assert.throws(() => parseRecipients(" , "), /EXERCISE_RECIPIENTS/);
+  });
+});
+
+describe("resolveRunMode", () => {
+  it("writes production rows only on a Vercel production deployment", () => {
+    assert.deepEqual(resolveRunMode({ VERCEL_ENV: "production" }), {
+      environment: "production",
+      devMode: false,
+    });
+  });
+
+  it("ignores the dev flag in production", () => {
+    assert.deepEqual(
+      resolveRunMode({ VERCEL_ENV: "production", DAILY_EXERCISE_DEV: "1" }),
+      { environment: "production", devMode: false },
+    );
+  });
+
+  it("treats local and preview runs as development", () => {
+    assert.deepEqual(resolveRunMode({}), {
+      environment: "development",
+      devMode: false,
+    });
+    assert.deepEqual(resolveRunMode({ VERCEL_ENV: "preview" }), {
+      environment: "development",
+      devMode: false,
+    });
+  });
+
+  it("enables dev mode locally with the flag", () => {
+    assert.deepEqual(resolveRunMode({ DAILY_EXERCISE_DEV: "1" }), {
+      environment: "development",
+      devMode: true,
+    });
   });
 });
 

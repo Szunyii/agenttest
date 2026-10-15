@@ -1,9 +1,10 @@
 import {
   parseRecipients,
+  resolveRunMode,
   runDailyExercise,
   type DailyExerciseResult,
 } from "./daily-exercise";
-import { disconnectPrisma } from "./db";
+import { createPrisma } from "./db";
 import { generateExercise } from "./exercise";
 import { createExerciseRepository } from "./exercise-repository";
 import { sendMail } from "./mailer";
@@ -19,21 +20,19 @@ function requireEnv(name: string): string {
 }
 
 export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
+  let prisma: ReturnType<typeof createPrisma> | undefined;
+
   try {
-    // Never honour the dev flag in production, where it would bypass the 9 o'clock check.
-    const devMode =
-      process.env.DAILY_EXERCISE_DEV === "1" &&
-      process.env.VERCEL_ENV !== "production";
+    const { environment, devMode } = resolveRunMode(process.env);
     const credentials = {
       user: requireEnv("GMAIL_USER"),
       // Google shows App Passwords in groups of four separated by spaces.
       appPassword: requireEnv("GMAIL_APP_PASSWORD").replace(/\s+/g, ""),
     };
     const recipients = parseRecipients(requireEnv("EXERCISE_RECIPIENTS"));
-    requireEnv("DATABASE_URL");
-    const repository = createExerciseRepository(
-      devMode ? "development" : "production",
-      (mail) => sendMail(credentials, mail),
+    prisma = createPrisma();
+    const repository = createExerciseRepository(prisma, environment, (mail) =>
+      sendMail(credentials, mail),
     );
 
     const result = await runDailyExercise({
@@ -53,9 +52,9 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
     console.error("[daily-exercise] failed", error);
     throw error;
   } finally {
-    // A once-a-day job gains nothing from pooling, and an idle socket left open
-    // could go stale while a Fluid Compute instance is suspended.
-    await disconnectPrisma().catch((error) =>
+    // Close this run's own client: a once-a-day job gains nothing from pooling,
+    // and an idle socket could go stale while the instance is suspended.
+    await prisma?.$disconnect().catch((error) =>
       console.warn("[daily-exercise] disconnect failed", error),
     );
   }

@@ -20,10 +20,10 @@ CREATE TABLE "daily_exercises" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "daily_exercises_slot_key" ON "daily_exercises"("slot");
+CREATE INDEX "daily_exercises_environment_created_at_idx" ON "daily_exercises"("environment", "created_at");
 
 -- CreateIndex
-CREATE INDEX "daily_exercises_environment_created_at_idx" ON "daily_exercises"("environment", "created_at");
+CREATE UNIQUE INDEX "daily_exercises_environment_slot_key" ON "daily_exercises"("environment", "slot");
 
 -- Supabase exposes the public schema over its REST API; with RLS on and no
 -- policies, only the database owner (Prisma) can read or write the table.

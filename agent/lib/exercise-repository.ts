@@ -1,12 +1,12 @@
+import type { PrismaClient } from "../../generated/prisma/client";
+
 import type {
   DeliveryResult,
+  Environment,
   ExerciseRecord,
   NewExerciseRecord,
   OutgoingMail,
 } from "./daily-exercise";
-import { getPrisma } from "./db";
-
-export type Environment = "production" | "development";
 
 // Must exceed the slowest send: DNS 10 s + connect 10 s per resolved address +
 // greeting 10 s + a 30 s socket stall ≈ 70 s. If it fired mid-send, the mail
@@ -35,12 +35,13 @@ function fromDateColumn(date: Date): string {
 }
 
 export function createExerciseRepository(
+  prisma: PrismaClient,
   environment: Environment,
   send: (mail: OutgoingMail) => Promise<void>,
 ) {
   return {
     async getPrevious(): Promise<ExerciseRecord | null> {
-      const row = await getPrisma().dailyExercise.findFirst({
+      const row = await prisma.dailyExercise.findFirst({
         where: { environment },
         // `id` breaks ties between dev runs inserted in the same millisecond.
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -63,7 +64,7 @@ export function createExerciseRepository(
         // Insert and send in one transaction: if sending fails, the insert is
         // rolled back. A parallel run inserting the same slot waits for this
         // transaction and then fails with a unique violation.
-        await getPrisma().$transaction(
+        await prisma.$transaction(
           async (tx) => {
             await tx.dailyExercise.create({
               data: {

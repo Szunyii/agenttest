@@ -54,7 +54,7 @@ A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supaba
 | `agent/lib/daily-exercise.ts` | módosul: a `saveLast` + `send` helyett egy `deliver` lépés; a `slot` itt számolódik |
 | `agent/lib/daily-exercise-job.ts` | módosul: a repository bekötése, `DATABASE_URL` ellenőrzése |
 | `agent/lib/exercise-store.ts` | *törlés* |
-| `package.json` | `prisma` (dev), `@prisma/client`, `@prisma/adapter-pg` 7.10.0, `pg` 8.23.1; `postinstall: prisma generate`; a `@upstash/redis` kikerül |
+| `package.json` | `prisma` (dev), `@prisma/client`, `@prisma/adapter-pg` 7.10.0 (a `pg`-t az illesztő hozza); `postinstall: prisma generate`; a `@upstash/redis` kikerül |
 
 ## A mag új szerződése (`daily-exercise.ts`)
 
@@ -72,6 +72,7 @@ A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supaba
 4. `generate()`: Claude írja a feladatot, az adatbázison kívül.
 5. `deliver()`: egy tranzakcióban (90 mp-es korláttal, ami hosszabb a leglassabb, kb. 70 mp-es levélküldésnél) beszúrja a sort, majd elküldi a levelet. Ha a beszúrás egyedi-megkötés hibával (`P2002`) bukik el, `already-sent`, levél nélkül.
 6. Sikeres lezárás: `sent`.
+7. A futás végén (hiba esetén is) a job lezárja az adatbázis-kapcsolatot, mert napi egy futásnál a nyitva tartott kapcsolat nem hoz semmit, és a Fluid Compute felfüggesztése alatt elavulhat.
 
 ## Hibakezelés
 
@@ -88,7 +89,7 @@ Minden hiba `[daily-exercise] failed` sorral kerül a naplóba, és a cron-futá
 ## Tesztelés
 
 - Unit tesztek a magra: a meglévők az új `deliver` szerződéshez igazítva, plusz: generálási hibánál nincs `deliver`; a `deliver` `already-sent` eredménye visszajut; a `slot` élesben a dátum, fejlesztéskor időbélyeg.
-- `eve info` és helyi `eve build`: az eve fordítója becsomagolja-e a Prisma 7 klienst.
+- `eve info` és helyi `eve build --skip-sandbox-prewarm` (helyben nincs sandbox-szolgáltató; ez csak a csomagolást ellenőrzi): az eve fordítója becsomagolja-e a Prisma 7 klienst.
 - Kézi próba helyben (fejlesztői mód): két futás, a második az első megoldásával kezdődik; egy futás szándékosan rossz App Password-del, utána nincs új sor a táblában.
 
 ## Beállítás

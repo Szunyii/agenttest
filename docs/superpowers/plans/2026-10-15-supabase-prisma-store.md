@@ -34,7 +34,7 @@ Előzmény: `docs/superpowers/plans/2026-10-14-daily-math-email.md` (a jelenlegi
 | `.gitignore` | módosít | `generated/` kizárása |
 | `package.json`, `package-lock.json` | módosít | Prisma-függőségek, `postinstall`, `@upstash/redis` törlése |
 | `agent/lib/daily-exercise.ts` | módosít | új szerződés: `getPrevious`, `generate`, `deliver`; `slot` |
-| `tests/daily-exercise.test.ts` | módosít | tesztek az új szerződéshez (19 teszt) |
+| `tests/daily-exercise.test.ts` | módosít | tesztek az új szerződéshez (20 teszt) |
 | `agent/lib/db.ts` | új | lusta Prisma-kliens (`getPrisma()`) |
 | `agent/lib/exercise-repository.ts` | új | `getPrevious` és tranzakciós `deliver` |
 | `agent/lib/daily-exercise-job.ts` | módosít | repository bekötése, `DATABASE_URL` ellenőrzése |
@@ -579,6 +579,12 @@ export function getPrisma(): PrismaClient {
 
   return client;
 }
+
+export async function disconnectPrisma(): Promise<void> {
+  const current = client;
+  client = undefined;
+  await current?.$disconnect();
+}
 ```
 
 - [ ] **Step 2: `agent/lib/exercise-repository.ts`**
@@ -711,12 +717,13 @@ import {
   runDailyExercise,
   type DailyExerciseResult,
 } from "./daily-exercise";
+import { disconnectPrisma } from "./db";
 import { generateExercise } from "./exercise";
 import { createExerciseRepository } from "./exercise-repository";
 import { sendMail } from "./mailer";
 
 function requireEnv(name: string): string {
-  const value = process.env[name];
+  const value = process.env[name]?.trim();
 
   if (!value) {
     throw new Error(`Missing environment variable: ${name}`);
@@ -759,6 +766,12 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
   } catch (error) {
     console.error("[daily-exercise] failed", error);
     throw error;
+  } finally {
+    // A once-a-day job gains nothing from pooling, and an idle socket left open
+    // could go stale while a Fluid Compute instance is suspended.
+    await disconnectPrisma().catch((error) =>
+      console.warn("[daily-exercise] disconnect failed", error),
+    );
   }
 }
 ```
@@ -775,8 +788,8 @@ Expected: `tsc exit: 0`, 20/20 teszt zöld, `eve info`: 0 hiba, 0 figyelmezteté
 
 - [ ] **Step 4: Build-ellenőrzés (a Prisma-kliens becsomagolása)**
 
-Run: `npx eve build; echo "build exit: $?"`
-Expected: `build exit: 0`, és a kimenetben nincs `generated/prisma`, `@prisma/client` vagy `query_compiler` feloldási hiba. Ne futtasd az `eve deploy`-t. Ha a build hálózatot vagy hitelesítést kér, vagy Prisma-csomagolási hibát ad, állj meg, és jelentsd a pontos kimenetet (BLOCKED).
+Run: `npx eve build --skip-sandbox-prewarm; echo "build exit: $?"`
+Expected: `build exit: 0`, és a kimenetben nincs `generated/prisma`, `@prisma/client` vagy `query_compiler` feloldási hiba. A `--skip-sandbox-prewarm` azért kell, mert helyben nincs sandbox-szolgáltató (Docker vagy `microsandbox`); ez csak a csomagolást ellenőrzi, ezt a kimenetet soha ne deployold. Ne futtasd az `eve deploy`-t. Ha a build hálózatot vagy hitelesítést kér, vagy Prisma-csomagolási hibát ad, állj meg, és jelentsd a pontos kimenetet (BLOCKED).
 
 - [ ] **Step 5: Commit**
 
@@ -888,11 +901,12 @@ vercel env add GMAIL_USER production
 vercel env add GMAIL_APP_PASSWORD production
 vercel env add EXERCISE_RECIPIENTS production
 vercel env add DATABASE_URL production
+vercel env add CRON_SECRET production
 ```
 
-Az `EXERCISE_RECIPIENTS` a három cím vesszővel. A `DIRECT_URL` és a `DAILY_EXERCISE_DEV` NEM kell élesben.
+Az `EXERCISE_RECIPIENTS` a három cím vesszővel. A `CRON_SECRET` egy hosszú véletlen érték (pl. `openssl rand -hex 32`): ha be van állítva, a cron-végpont csak a Vercel saját hívását fogadja el. A `DIRECT_URL` és a `DAILY_EXERCISE_DEV` NEM kell élesben.
 
-- [ ] **Step 4: Deploy:** `npx eve deploy --non-interactive --yes` → kilépési kód 0. Figyelem: az `eve deploy` a munkakönyvtárat tölti fel, a felhasználó commitolatlan fájljaival együtt (pl. `agent/instructions.md`).
-- [ ] **Step 5: Ellenőrzés:** Vercel → Settings → Cron Jobs: `0 7 * * *` és `0 8 * * *`; Settings → Functions: Fluid Compute bekapcsolva, és a Function Region a Supabase-projekt régiójához közel van (pl. EU-s Supabase esetén `fra1`). Az alapértelmezett `iad1` (USA) minden adatbázis-kéréshez nagyjából 90 ms-ot ad.
+- [ ] **Step 4: Deploy:** `npx eve deploy --non-interactive --yes` → kilépési kód 0. Figyelem: az `eve deploy` a munkakönyvtárat tölti fel, a felhasználó commitolatlan fájljaival együtt (pl. `agent/instructions.md`). A Vercelen futó build előkészíti a sandboxot („initializing 1 sandbox template”); ha ez elbukik, a deploy is leáll, és a hibaüzenet a sandboxról szól, nem az adatbázisról.
+- [ ] **Step 5: Ellenőrzés:** Vercel → Settings → Cron Jobs: `0 7 * * *` és `0 8 * * *`; Settings → Functions: Fluid Compute bekapcsolva, a Max Duration legalább 300 mp (a job legrosszabb esetben a Claude-generálás plusz 90 mp tranzakció), és a Function Region a Supabase-projekt régiójához közel van (pl. EU-s Supabase esetén `fra1`). Az alapértelmezett `iad1` (USA) minden adatbázis-kéréshez nagyjából 90 ms-ot ad.
 - [ ] **Step 6: Első éles reggel:** 9:00 és 10:00 között a Vercel logjában egy `[daily-exercise] sent` és egy `skipped-hour`; a címzettek megkapták a levelet; a táblában egy `production` sor a mai dátummal.
 - [ ] **Step 7: Szüneteltetés figyelése:** az első héten ellenőrizd a Supabase-ben, hogy a projekt nem került „Paused” állapotba.

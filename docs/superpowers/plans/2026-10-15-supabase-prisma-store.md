@@ -565,7 +565,14 @@ export function getPrisma(): PrismaClient {
       throw new Error("Missing environment variable: DATABASE_URL");
     }
 
-    client = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    client = new PrismaClient({
+      adapter: new PrismaPg({
+        connectionString,
+        // Supabase's pooler strings carry no sslmode, so force TLS. The
+        // pooler's CA is not in Node's trust store, so it is not verified.
+        ssl: { rejectUnauthorized: false },
+      }),
+    });
   }
 
   return client;
@@ -613,7 +620,8 @@ export function createExerciseRepository(
     async getPrevious(): Promise<ExerciseRecord | null> {
       const row = await getPrisma().dailyExercise.findFirst({
         where: { environment },
-        orderBy: { createdAt: "desc" },
+        // `id` breaks ties between dev runs inserted in the same millisecond.
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       });
 
       return row
@@ -805,7 +813,7 @@ A titkos adatokat a felhasználó írja be a `.env.development.local`-ba; a vég
 
 - [ ] **Step 1: A felhasználó kitölti a `.env.development.local`-t**
 
-A Supabase-projektben: **Connect** → **ORMs** vagy **Connection string**.
+A Supabase-projektben: **Connect** → **Connection string**, a „Transaction pooler” és a „Session pooler” sima URI-ja, a jelszóval kiegészítve. A Prisma-fül változata `?pgbouncer=true`-t tesz a végére, ami a `pg` illesztőnek nem kell.
 
 ```
 DATABASE_URL=<Transaction pooler, 6543-as port, jelszóval>
@@ -824,7 +832,9 @@ Expected: `1 migration found` és `All migrations have been successfully applied
 
 - [ ] **Step 3: Ellenőrzés**
 
-Supabase → Table Editor: van `daily_exercises` tábla, a jelzése „RLS enabled”, 0 sor. Supabase → Advisors → Security: a táblára nincs „RLS disabled” figyelmeztetés.
+Supabase → Table Editor: van `daily_exercises` (0 sor) és `_prisma_migrations` (1 sor) tábla, mindkettőn „RLS enabled” jelzéssel. Supabase → Advisors → Security: egyik táblára sincs „RLS disabled in public” figyelmeztetés.
+
+Opcionális: mivel az adatbázist csak a Prisma használja, a Supabase nyilvános Data API-ja kikapcsolható (Project Settings → Data API). Így a `public` séma semmilyen formában nem érhető el kívülről.
 
 ---
 
@@ -837,7 +847,7 @@ Run (a felhasználó, külön terminálban): `npm run dev`
 - [ ] **Step 2: Első futás**
 
 Run: `curl -si -X POST http://localhost:2000/eve/v1/dev/schedules/daily-exercise-summer`
-Expected: `HTTP/1.1 200`, a logban `[daily-exercise] sent`, levél a saját címre előző-blokk nélkül, a táblában 1 `development` sor időbélyeges `slot`-tal.
+Expected: `HTTP/1.1 200`, a logban `[daily-exercise] sent`, levél a saját címre előző-blokk nélkül, a táblában 1 `development` sor időbélyeges `slot`-tal. Ha a logban TLS-hiba áll (pl. `self-signed certificate`), vagy a kapcsolat titkosítatlan, állj meg és jelentsd: ez az első valódi próbája a `db.ts` `ssl` beállításának.
 
 - [ ] **Step 3: Második futás**
 

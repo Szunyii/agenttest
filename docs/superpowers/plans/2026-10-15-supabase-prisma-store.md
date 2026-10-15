@@ -813,7 +813,7 @@ A titkos adatokat a felhasználó írja be a `.env.development.local`-ba; a vég
 
 - [ ] **Step 1: A felhasználó kitölti a `.env.development.local`-t**
 
-A Supabase-projektben: **Connect** → **Connection string**, a „Transaction pooler” és a „Session pooler” sima URI-ja, a jelszóval kiegészítve. A Prisma-fül változata `?pgbouncer=true`-t tesz a végére, ami a `pg` illesztőnek nem kell.
+A Supabase-projektben: **Connect** → **Connection string**, a „Transaction pooler” és a „Session pooler” sima URI-ja, a jelszóval kiegészítve. A Prisma-fül változata `?pgbouncer=true`-t tesz a végére, ami a `pg` illesztőnek nem kell. A `DATABASE_URL` ne tartalmazzon `sslmode` paramétert: az felülírná a `db.ts` TLS-beállítását, és a `require` értéket a `pg` teljes tanúsítvány-ellenőrzésként értelmezné, ami a Supabase poolerén elbukik.
 
 ```
 DATABASE_URL=<Transaction pooler, 6543-as port, jelszóval>

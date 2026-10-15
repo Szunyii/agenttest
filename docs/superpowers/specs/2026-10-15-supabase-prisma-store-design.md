@@ -70,7 +70,7 @@ A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supaba
 2. Ha Budapesten nem 9 óra van (és nem fejlesztői mód), kilép: `skipped-hour`.
 3. `getPrevious()`. Ha élesben ennek a dátuma a mai, kilép: `already-sent`.
 4. `generate()`: Claude írja a feladatot, az adatbázison kívül.
-5. `deliver()`: egy tranzakcióban (60 mp-es korláttal) beszúrja a sort, majd elküldi a levelet. Ha a beszúrás egyedi-megkötés hibával (`P2002`) bukik el, `already-sent`, levél nélkül.
+5. `deliver()`: egy tranzakcióban (90 mp-es korláttal, ami hosszabb a leglassabb, kb. 70 mp-es levélküldésnél) beszúrja a sort, majd elküldi a levelet. Ha a beszúrás egyedi-megkötés hibával (`P2002`) bukik el, `already-sent`, levél nélkül.
 6. Sikeres lezárás: `sent`.
 
 ## Hibakezelés

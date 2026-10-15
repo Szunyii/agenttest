@@ -571,6 +571,8 @@ export function getPrisma(): PrismaClient {
         // Supabase's pooler strings carry no sslmode, so force TLS. The
         // pooler's CA is not in Node's trust store, so it is not verified.
         ssl: { rejectUnauthorized: false },
+        // Without it, pg waits for the OS TCP timeout if the pooler is unreachable.
+        connectionTimeoutMillis: 10_000,
       }),
     });
   }
@@ -592,8 +594,14 @@ import { getPrisma } from "./db";
 
 export type Environment = "production" | "development";
 
-// The mailer's SMTP timeouts allow up to ~40 s; Prisma's default is 5 s.
-const transactionTimeoutMs = 60_000;
+// Must exceed the slowest send: DNS 10 s + connect 10 s per resolved address +
+// greeting 10 s + a 30 s socket stall ≈ 70 s. If it fired mid-send, the mail
+// could go out while the insert is rolled back. It stays below Supabase's 2 min
+// statement cap, so a parallel run waiting on the slot still gets P2002.
+const transactionTimeoutMs = 90_000;
+// The pooled connection has usually gone idle during generation, so the
+// transaction opens a fresh TLS connection; Prisma's 2 s default is tight.
+const transactionMaxWaitMs = 10_000;
 
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -656,7 +664,7 @@ export function createExerciseRepository(
             });
             await send(mail);
           },
-          { timeout: transactionTimeoutMs },
+          { timeout: transactionTimeoutMs, maxWait: transactionMaxWaitMs },
         );
 
         return "sent";
@@ -763,7 +771,7 @@ Expected: kilépési kód 0; a `package.json`-ban nincs `@upstash/redis`. A `gre
 - [ ] **Step 3: Typecheck, tesztek, eve**
 
 Run: `npx tsc --noEmit; echo "tsc exit: $?"; npm test; npx eve info 2>&1 | head -60`
-Expected: `tsc exit: 0`, 19/19 teszt zöld, `eve info`: 0 hiba, 0 figyelmeztetés, 2 schedule.
+Expected: `tsc exit: 0`, 20/20 teszt zöld, `eve info`: 0 hiba, 0 figyelmeztetés, 2 schedule.
 
 - [ ] **Step 4: Build-ellenőrzés (a Prisma-kliens becsomagolása)**
 
@@ -834,6 +842,8 @@ Expected: `1 migration found` és `All migrations have been successfully applied
 
 Supabase → Table Editor: van `daily_exercises` (0 sor) és `_prisma_migrations` (1 sor) tábla, mindkettőn „RLS enabled” jelzéssel. Supabase → Advisors → Security: egyik táblára sincs „RLS disabled in public” figyelmeztetés.
 
+Supabase → SQL Editor: `SHOW idle_in_transaction_session_timeout;`. Expected: `0`, vagy legalább 90 másodperc. A tranzakció a levélküldés alatt tétlen, és egy rövidebb korlát megszakítaná.
+
 Opcionális: mivel az adatbázist csak a Prisma használja, a Supabase nyilvános Data API-ja kikapcsolható (Project Settings → Data API). Így a `public` séma semmilyen formában nem érhető el kívülről.
 
 ---
@@ -883,6 +893,6 @@ vercel env add DATABASE_URL production
 Az `EXERCISE_RECIPIENTS` a három cím vesszővel. A `DIRECT_URL` és a `DAILY_EXERCISE_DEV` NEM kell élesben.
 
 - [ ] **Step 4: Deploy:** `npx eve deploy --non-interactive --yes` → kilépési kód 0. Figyelem: az `eve deploy` a munkakönyvtárat tölti fel, a felhasználó commitolatlan fájljaival együtt (pl. `agent/instructions.md`).
-- [ ] **Step 5: Ellenőrzés:** Vercel → Settings → Cron Jobs: `0 7 * * *` és `0 8 * * *`; Settings → Functions: Fluid Compute bekapcsolva.
+- [ ] **Step 5: Ellenőrzés:** Vercel → Settings → Cron Jobs: `0 7 * * *` és `0 8 * * *`; Settings → Functions: Fluid Compute bekapcsolva, és a Function Region a Supabase-projekt régiójához közel van (pl. EU-s Supabase esetén `fra1`). Az alapértelmezett `iad1` (USA) minden adatbázis-kéréshez nagyjából 90 ms-ot ad.
 - [ ] **Step 6: Első éles reggel:** 9:00 és 10:00 között a Vercel logjában egy `[daily-exercise] sent` és egy `skipped-hour`; a címzettek megkapták a levelet; a táblában egy `production` sor a mai dátummal.
 - [ ] **Step 7: Szüneteltetés figyelése:** az első héten ellenőrizd a Supabase-ben, hogy a projekt nem került „Paused” állapotba.

@@ -50,7 +50,7 @@ A migráció bekapcsolja az RLS-t a táblán, szabályok nélkül, mert a Supaba
 | `prisma.config.ts` | *új*: Prisma 7 konfiguráció; a CLI a `DIRECT_URL`-t használja, helyben a `.env.development.local`-ból |
 | `prisma/migrations/` | *új*: a tábla és az RLS bekapcsolása |
 | `agent/lib/db.ts` | *új*: Prisma-kliens a `@prisma/adapter-pg` illesztővel, `DATABASE_URL` alapján |
-| `agent/lib/exercise-repository.ts` | *új*: `createExerciseRepository(environment)` → `getPrevious()` és `deliver(record, send)` |
+| `agent/lib/exercise-repository.ts` | *új*: `createExerciseRepository(environment, send)` → `getPrevious()` és `deliver(record, mail)` |
 | `agent/lib/daily-exercise.ts` | módosul: a `saveLast` + `send` helyett egy `deliver` lépés; a `slot` itt számolódik |
 | `agent/lib/daily-exercise-job.ts` | módosul: a repository bekötése, `DATABASE_URL` ellenőrzése |
 | `agent/lib/exercise-store.ts` | *törlés* |

@@ -24,8 +24,25 @@ model DailyExercise {
   exercise    String
   solution    String
   createdAt   DateTime    @default(now()) @map("created_at")
+  submissions Submission[]
 
   @@unique([environment, slot])
   @@index([environment, createdAt])
   @@map("daily_exercises")
+}
+
+model Submission {
+  id             Int           @id @default(autoincrement())
+  exerciseId     Int           @map("exercise_id")
+  exercise       DailyExercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  // The sender's address, lowercased.
+  email          String
+  replyMessageId String        @map("reply_message_id")
+  receivedAt     DateTime      @map("received_at")
+  score          Int
+  feedback       String
+  gradedAt       DateTime      @default(now()) @map("graded_at")
+
+  @@unique([exerciseId, email])
+  @@map("submissions")
 }

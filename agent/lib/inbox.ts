@@ -104,15 +104,16 @@ async function readInbox(
       // Once the connection is closed, imapflow returns empty results instead
       // of failing; a cut-short read must not look like "no replies".
       if (timedOut || !client.usable) {
-        throw new Error(
-          timedOut ? "IMAP read timed out" : "IMAP connection lost",
-        );
+        throw new Error("connection lost");
       }
 
       return replies;
     } finally {
       lock.release();
     }
+  } catch (error) {
+    // A timeout usually surfaces as the pending command's lost connection.
+    throw timedOut ? new Error("read timed out", { cause: error }) : error;
   } finally {
     await client.logout().catch(() => client.close());
     clearTimeout(timer);

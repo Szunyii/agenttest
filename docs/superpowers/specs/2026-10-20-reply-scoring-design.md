@@ -28,6 +28,7 @@ A címzettek válaszlevélben visszaküldik a napi feladat megoldását, szöveg
 | Levelek | Címzettenként külön levél, `To:` a saját cím, BCC nélkül, egyetlen SMTP-kapcsolaton | A pontszám személyes |
 | Párosítás | Saját Message-ID minden kiküldött levélben (környezet + feladat-azonosító), a válasz `In-Reply-To`/`References` fejléce alapján | Pontosan azonosítja a feladatot, és a dev és az éles futások válaszai nem keverednek |
 | Több válasz | A legkésőbb érkezett (`receivedAt`) számít a következő futásig | Javíthat, aki elrontotta |
+| Automatikus válasz (pl. házon kívül) | Kimarad (`Auto-Submitted` fejléc, RFC 3834) | Különben üres megoldásként 0 pontot kapna |
 | Hibatűrés | Az IMAP vagy a pontozás hibája nem állítja le a küldést | A napi feladat a fontosabb |
 
 ## Adatmodell
@@ -60,7 +61,7 @@ Egy válasz akkor tartozik az előző feladathoz, ha az `In-Reply-To` vagy a `Re
 | `prisma/schema.prisma` | módosul: `Submission` modell, `submissions` reláció a `DailyExercise`-on |
 | `prisma/migrations/` | *új* migráció: a `submissions` tábla és az RLS |
 | `agent/lib/message-id.ts` | *új*: `buildMessageId(environment, exerciseId)` és `parseMessageIds(headerValues)` → a fejlécekben talált saját azonosítók (`{ environment, exerciseId }`) |
-| `agent/lib/inbox.ts` | *új*: `fetchReplies(credentials, since)` → `InboundReply[]`. `imapflow`-val olvassa az INBOX-ot, a leveleket nem jelöli olvasottnak; `mailparser`-rel kinyeri a szöveget és a képmellékleteket; 30 mp-es időkorlát |
+| `agent/lib/inbox.ts` | *új*: `readReplies(credentials, since, exercise)` → `InboundReply[]`. `imapflow`-val olvassa az INBOX-ot, a leveleket nem jelöli olvasottnak; csak az adott feladatra (és környezetre) hivatkozó, nem automatikus válaszokat tölti le, így a dev futás nem olvassa az éles válaszokat; `mailparser`-rel kinyeri a szöveget és a képmellékleteket; 30 mp-es időkorlát; egy félbeszakadt olvasás hibát ad, nem üres listát; a hibaüzenet tartalmazza az IMAP-kódot (pl. `AUTHENTICATIONFAILED`) |
 | `agent/lib/replies.ts` | *új*, tiszta függvény: `selectReplies(replies, { environment, exerciseId, recipients })` → címzettenként a legutolsó érvényes válasz |
 | `agent/lib/grader.ts` | *új*: `gradeAnswer(exercise, reply)` → `{ score, feedback }`; Claude (`claude-sonnet-5-5`) strukturált kimenettel, a képek fájlrészként, 90 mp-es időkorlát (a kép nélküli újrapróbálással együtt) |
 | `agent/lib/daily-exercise.ts` | módosul: a `composeEmail` személyre szabott, pontszám-sorral; a `runDailyExercise` vezérli a beolvasást, a pontozást és a címzettenkénti leveleket |

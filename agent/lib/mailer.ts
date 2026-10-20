@@ -10,11 +10,11 @@ export interface MailCredentials {
 export async function sendMails(
   credentials: MailCredentials,
   mails: OutgoingMail[],
+  signal: AbortSignal,
 ): Promise<void> {
-  // One pooled connection carries all of today's emails, so the worst case
-  // stays inside the delivery transaction's timeout. Short timeouts turn a hung
-  // SMTP connection into a logged error instead of the platform silently
-  // killing the function.
+  // One pooled connection carries all of today's emails (see the budget in
+  // exercise-repository.ts). Short timeouts turn a hung SMTP connection into a
+  // logged error instead of the platform silently killing the function.
   const transport = createTransport({
     service: "gmail",
     pool: true,
@@ -22,25 +22,26 @@ export async function sendMails(
     auth: { user: credentials.user, pass: credentials.appPassword },
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
-    dnsTimeout: 10_000,
+    // Per DNS attempt: Node's resolver retries a few times on its own.
+    dnsTimeout: 3_000,
     socketTimeout: 20_000,
   });
 
   try {
     for (const mail of mails) {
+      // Past the deadline the delivery transaction is about to roll back, so
+      // stop rather than send emails for an exercise that won't be saved.
+      signal.throwIfAborted();
+
       // Our own Message-ID lets the next run match the replies to this email.
-      const info = await transport.sendMail({
+      // With one recipient per email, a refused address makes this throw.
+      await transport.sendMail({
         from: credentials.user,
         to: mail.to,
         messageId: mail.messageId,
         subject: mail.subject,
         text: mail.text,
       });
-
-      // Gmail accepts the mail as long as the address is well-formed.
-      if (info.rejected.length > 0) {
-        console.warn("[mailer] rejected recipients:", info.rejected);
-      }
     }
   } finally {
     transport.close();

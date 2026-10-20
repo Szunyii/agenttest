@@ -11,13 +11,16 @@ import type {
 } from "./daily-exercise";
 import type { InboundReply } from "./replies";
 
-// Must exceed the slowest delivery. All emails share one SMTP connection: DNS
-// 10 s + connect 10 s per resolved address (2) + greeting 10 s + a 20 s socket
-// stall per email (3 recipients) ≈ 100 s. If it fired mid-send, an email could
-// go out while the insert is rolled back. It stays below Supabase's 2 min
-// statement cap, so a parallel run waiting on the slot still gets P2002. With
-// more than 5 recipients this budget has to be redone.
+// Must exceed the delivery. All emails share one SMTP connection: roughly DNS,
+// connect, greeting and login (up to ~30 s if the server is slow) plus a few
+// seconds per email, well under 110 s for a handful of recipients. This is an
+// estimate, not a bound; the real guard is the send deadline below: no new
+// email starts after it, so at most the one in flight can go out while the
+// insert is rolled back. The timeout stays below Supabase's 2 min statement
+// cap, so a parallel run waiting on the slot still gets P2002.
 const transactionTimeoutMs = 110_000;
+// Leaves room for the email in flight and the commit before the timeout.
+const sendDeadlineMs = 90_000;
 // The pooled connection has usually gone idle during generation, so the
 // transaction opens a fresh TLS connection; Prisma's 2 s default is tight.
 const transactionMaxWaitMs = 10_000;
@@ -42,7 +45,7 @@ function fromDateColumn(date: Date): string {
 export function createExerciseRepository(
   prisma: PrismaClient,
   environment: Environment,
-  send: (mails: OutgoingMail[]) => Promise<void>,
+  send: (mails: OutgoingMail[], signal: AbortSignal) => Promise<void>,
 ) {
   return {
     async getPrevious(): Promise<ExerciseRecord | null> {
@@ -84,6 +87,8 @@ export function createExerciseRepository(
       reply: InboundReply,
       grade: Grade,
     ): Promise<void> {
+      // Stored lowercased, as getScores' callers look it up.
+      const key = email.toLowerCase();
       const data = {
         replyMessageId: reply.messageId,
         receivedAt: reply.receivedAt,
@@ -94,8 +99,8 @@ export function createExerciseRepository(
 
       // A newer reply from the same recipient replaces the earlier score.
       await prisma.submission.upsert({
-        where: { exerciseId_email: { exerciseId, email } },
-        create: { exerciseId, email, ...data },
+        where: { exerciseId_email: { exerciseId, email: key } },
+        create: { exerciseId, email: key, ...data },
         update: data,
       });
     },
@@ -122,7 +127,7 @@ export function createExerciseRepository(
               },
             });
             // The emails' Message-IDs carry the new row's id.
-            await send(buildMails(row.id));
+            await send(buildMails(row.id), AbortSignal.timeout(sendDeadlineMs));
           },
           { timeout: transactionTimeoutMs, maxWait: transactionMaxWaitMs },
         );

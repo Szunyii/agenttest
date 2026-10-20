@@ -141,6 +141,14 @@ describe("parseRecipients", () => {
       ["a@example.com", "b@example.com"],
     );
   });
+
+  it("rejects malformed addresses before anything is sent", () => {
+    assert.throws(
+      () => parseRecipients("a@example.com, anna@gmail"),
+      /malformed addresses: anna@gmail/,
+    );
+    assert.throws(() => parseRecipients("x@gmail,com"), /malformed/);
+  });
 });
 
 describe("resolveRunMode", () => {

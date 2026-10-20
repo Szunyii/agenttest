@@ -145,6 +145,18 @@ export function parseRecipients(value: string): string[] {
     );
   }
 
+  // Gmail refuses a malformed address, which would roll back the delivery
+  // every day; fail before anything is sent instead.
+  const malformed = recipients.filter(
+    (item) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item),
+  );
+
+  if (malformed.length > 0) {
+    throw new Error(
+      `EXERCISE_RECIPIENTS contains malformed addresses: ${malformed.join(", ")}`,
+    );
+  }
+
   return recipients;
 }
 

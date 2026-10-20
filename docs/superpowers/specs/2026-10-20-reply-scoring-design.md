@@ -177,7 +177,9 @@ A válasz tartalma adat, nem utasítás: a rendszerprompt kimondja, hogy a benne
 | Az API visszautasítja a képeket (400) | Figyelmeztetés a logban (csak a hibaüzenet); a pontozó kép nélkül újrapróbálja, az indoklás megemlíti a képet |
 | A `saveScore` elbukik | Figyelmeztetés a logban; a levélben a pontszám ettől még szerepel |
 | A generálás elbukik | Nem megy ki levél, a job hibával áll le, mint most |
-| SMTP-hiba | A beszúrás visszagörgetődik, mint most. A pontszámok megmaradnak, így egy újrafuttatás nem pontoz újra. Ismert, ritka eset: ha az első levél kiment és egy későbbi elbukik, kézi újrafuttatáskor az első címzett kétszer kapja meg a levelet |
+| SMTP-hiba | A beszúrás visszagörgetődik, mint most. A pontszámok megmaradnak, így egy újrafuttatás nem pontoz újra. Ismert, ritka eset: ha egy levél kiment és egy későbbi elbukik, kézi újrafuttatáskor a már kiszolgált címzettek kétszer kapják meg a levelet; ha valaki az elsőre (a visszagörgetett feladatra) válaszol, az a válasz nem párosítható |
+| A küldés túllépi a határidőt (90 mp) | Új levél nem indul; a folyamatban lévő még kimehet; a beszúrás visszagörgetődik |
+| Hibás formátumú cím az `EXERCISE_RECIPIENTS`-ben (pl. `anna@gmail`) | A job küldés előtt hibával leáll, mert a Gmail visszautasítaná, és minden nap részleges küldés és visszagörgetés lenne belőle |
 | Aliasról érkező válasz (pl. `@me.com` az `@icloud.com` helyett) | Nem számít; az aliast fel kell venni az `EXERCISE_RECIPIENTS`-be |
 
 ## Tesztelés

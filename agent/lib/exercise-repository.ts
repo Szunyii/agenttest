@@ -4,15 +4,20 @@ import type {
   DeliveryResult,
   Environment,
   ExerciseRecord,
+  Grade,
   NewExerciseRecord,
   OutgoingMail,
+  StoredScore,
 } from "./daily-exercise";
+import type { InboundReply } from "./replies";
 
-// Must exceed the slowest send: DNS 10 s + connect 10 s per resolved address +
-// greeting 10 s + a 30 s socket stall ≈ 70 s. If it fired mid-send, the mail
-// could go out while the insert is rolled back. It stays below Supabase's 2 min
-// statement cap, so a parallel run waiting on the slot still gets P2002.
-const transactionTimeoutMs = 90_000;
+// Must exceed the slowest delivery. All emails share one SMTP connection: DNS
+// 10 s + connect 10 s per resolved address (2) + greeting 10 s + a 20 s socket
+// stall per email (3 recipients) ≈ 100 s. If it fired mid-send, an email could
+// go out while the insert is rolled back. It stays below Supabase's 2 min
+// statement cap, so a parallel run waiting on the slot still gets P2002. With
+// more than 5 recipients this budget has to be redone.
+const transactionTimeoutMs = 110_000;
 // The pooled connection has usually gone idle during generation, so the
 // transaction opens a fresh TLS connection; Prisma's 2 s default is tight.
 const transactionMaxWaitMs = 10_000;
@@ -37,7 +42,7 @@ function fromDateColumn(date: Date): string {
 export function createExerciseRepository(
   prisma: PrismaClient,
   environment: Environment,
-  send: (mail: OutgoingMail) => Promise<void>,
+  send: (mails: OutgoingMail[]) => Promise<void>,
 ) {
   return {
     async getPrevious(): Promise<ExerciseRecord | null> {
@@ -49,16 +54,55 @@ export function createExerciseRepository(
 
       return row
         ? {
+            id: row.id,
             date: fromDateColumn(row.date),
+            createdAt: row.createdAt,
             exercise: row.exercise,
             solution: row.solution,
           }
         : null;
     },
 
+    async getScores(exerciseId: number): Promise<Map<string, StoredScore>> {
+      const rows = await prisma.submission.findMany({ where: { exerciseId } });
+
+      return new Map(
+        rows.map((row) => [
+          row.email,
+          {
+            replyMessageId: row.replyMessageId,
+            score: row.score,
+            feedback: row.feedback,
+          },
+        ]),
+      );
+    },
+
+    async saveScore(
+      exerciseId: number,
+      email: string,
+      reply: InboundReply,
+      grade: Grade,
+    ): Promise<void> {
+      const data = {
+        replyMessageId: reply.messageId,
+        receivedAt: reply.receivedAt,
+        score: grade.score,
+        feedback: grade.feedback,
+        gradedAt: new Date(),
+      };
+
+      // A newer reply from the same recipient replaces the earlier score.
+      await prisma.submission.upsert({
+        where: { exerciseId_email: { exerciseId, email } },
+        create: { exerciseId, email, ...data },
+        update: data,
+      });
+    },
+
     async deliver(
       record: NewExerciseRecord,
-      mail: OutgoingMail,
+      buildMails: (exerciseId: number) => OutgoingMail[],
     ): Promise<DeliveryResult> {
       try {
         // Insert and send in one transaction: if sending fails, the insert is
@@ -66,7 +110,7 @@ export function createExerciseRepository(
         // transaction and then fails with a unique violation.
         await prisma.$transaction(
           async (tx) => {
-            await tx.dailyExercise.create({
+            const row = await tx.dailyExercise.create({
               data: {
                 environment,
                 slot: record.slot,
@@ -77,7 +121,8 @@ export function createExerciseRepository(
                 solution: record.solution,
               },
             });
-            await send(mail);
+            // The emails' Message-IDs carry the new row's id.
+            await send(buildMails(row.id));
           },
           { timeout: transactionTimeoutMs, maxWait: transactionMaxWaitMs },
         );

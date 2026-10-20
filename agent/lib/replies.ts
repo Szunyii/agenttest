@@ -20,9 +20,12 @@ export interface InboundReply {
   skippedImages: number;
 }
 
-export interface ReplyTarget {
+export interface ExerciseRef {
   environment: Environment;
   exerciseId: number;
+}
+
+export interface ReplyTarget extends ExerciseRef {
   recipients: string[];
 }
 
@@ -60,8 +63,24 @@ export function parseMessageIds(
     });
 }
 
-export function referencesOwnMessage(values: string[]): boolean {
-  return parseMessageIds(values).length > 0;
+// Whether the header values reference one of our emails about this exercise.
+export function answersExercise(
+  references: string[],
+  exercise: ExerciseRef,
+): boolean {
+  return parseMessageIds(references).some(
+    (id) =>
+      id.environment === exercise.environment &&
+      id.exerciseId === exercise.exerciseId,
+  );
+}
+
+// RFC 3834: any Auto-Submitted value but "no" means a machine sent it, such as
+// an out-of-office answer, which must not be graded as an empty solution.
+export function isAutoReply(headerText: string): boolean {
+  const match = /^auto-submitted:\s*([^\s;]+)/im.exec(headerText);
+
+  return match !== null && match[1].toLowerCase() !== "no";
 }
 
 // The latest reply from each recipient that answers the target exercise,
@@ -77,11 +96,7 @@ export function selectReplies(
 
   for (const reply of replies) {
     const from = reply.from.toLowerCase();
-    const answersTarget = parseMessageIds(reply.references).some(
-      (id) =>
-        id.environment === target.environment &&
-        id.exerciseId === target.exerciseId,
-    );
+    const answersTarget = answersExercise(reply.references, target);
 
     if (!recipients.has(from) || !answersTarget) {
       continue;

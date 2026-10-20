@@ -46,11 +46,13 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       recipients,
       getPrevious: repository.getPrevious,
       fetchReplies: async (previous) =>
-        selectReplies(await readReplies(credentials, previous.createdAt), {
-          environment,
-          exerciseId: previous.id,
-          recipients,
-        }),
+        selectReplies(
+          await readReplies(credentials, previous.createdAt, {
+            environment,
+            exerciseId: previous.id,
+          }),
+          { environment, exerciseId: previous.id, recipients },
+        ),
       getScores: repository.getScores,
       grade: gradeAnswer,
       saveScore: repository.saveScore,

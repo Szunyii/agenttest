@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  answersExercise,
   buildMessageId,
+  isAutoReply,
   parseMessageIds,
-  referencesOwnMessage,
   selectImages,
   selectReplies,
   type InboundReply,
@@ -82,13 +83,38 @@ describe("parseMessageIds", () => {
   });
 });
 
-describe("referencesOwnMessage", () => {
-  it("tells whether a message answers one of our emails", () => {
+describe("answersExercise", () => {
+  it("matches only our ids for the given environment and exercise", () => {
+    const exercise = { environment: "production" as const, exerciseId: 3 };
+
     assert.equal(
-      referencesOwnMessage(["References: <a@x> <production.3.f0@napi-matek>"]),
+      answersExercise(
+        ["References: <a@x> <production.3.f0@napi-matek>"],
+        exercise,
+      ),
       true,
     );
-    assert.equal(referencesOwnMessage(["<a@x>", ""]), false);
+    assert.equal(
+      answersExercise(["<development.3.f0@napi-matek>"], exercise),
+      false,
+    );
+    assert.equal(
+      answersExercise(["<production.2.f0@napi-matek>"], exercise),
+      false,
+    );
+    assert.equal(answersExercise(["<a@x>", ""], exercise), false);
+  });
+});
+
+describe("isAutoReply", () => {
+  it("treats every Auto-Submitted value but no as automatic", () => {
+    assert.equal(
+      isAutoReply("References: <a@x>\r\nAuto-Submitted: auto-replied\r\n"),
+      true,
+    );
+    assert.equal(isAutoReply("auto-submitted: Auto-Generated; x=y\r\n"), true);
+    assert.equal(isAutoReply("Auto-Submitted: no\r\n"), false);
+    assert.equal(isAutoReply("References: <a@x>\r\n\r\n"), false);
   });
 });
 

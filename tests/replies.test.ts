@@ -93,7 +93,7 @@ describe("referencesOwnMessage", () => {
 });
 
 describe("selectReplies", () => {
-  it("keeps the latest reply of each sender", () => {
+  it("keeps the latest reply of each sender, whatever the order", () => {
     const early = reply({
       messageId: "<r1@x>",
       receivedAt: new Date("2026-10-14T10:00:00Z"),
@@ -104,11 +104,16 @@ describe("selectReplies", () => {
     });
     const other = reply({ from: "b@example.com", messageId: "<r3@x>" });
 
-    const selected = selectReplies([late, other, early], target);
+    for (const replies of [
+      [early, late, other],
+      [late, other, early],
+    ]) {
+      const selected = selectReplies(replies, target);
 
-    assert.equal(selected.size, 2);
-    assert.equal(selected.get("a@example.com"), late);
-    assert.equal(selected.get("b@example.com"), other);
+      assert.equal(selected.size, 2);
+      assert.equal(selected.get("a@example.com"), late);
+      assert.equal(selected.get("b@example.com"), other);
+    }
   });
 
   it("accepts only recipients, ignoring letter case in the list", () => {
@@ -139,6 +144,28 @@ describe("selectReplies", () => {
     );
 
     assert.equal(selected.size, 0);
+  });
+
+  it("accepts a reply that also references an older exercise", () => {
+    const selected = selectReplies(
+      [
+        reply({
+          references: [
+            "<production.6.abc@napi-matek>",
+            "<production.7.abc@napi-matek>",
+          ],
+        }),
+      ],
+      target,
+    );
+
+    assert.equal(selected.size, 1);
+  });
+
+  it("matches and keys senders in lower case", () => {
+    const selected = selectReplies([reply({ from: "A@Example.COM" })], target);
+
+    assert.deepEqual([...selected.keys()], ["a@example.com"]);
   });
 });
 
@@ -177,6 +204,15 @@ describe("selectImages", () => {
       ["image/png", "image/gif", "image/webp"],
     );
     assert.equal(skipped, 3);
+  });
+
+  it("accepts an image of exactly 5 MB", () => {
+    const { images, skipped } = selectImages([
+      image("image/jpeg", 5 * 1024 * 1024),
+    ]);
+
+    assert.equal(images.length, 1);
+    assert.equal(skipped, 0);
   });
 
   it("ignores attachments that are not images", () => {

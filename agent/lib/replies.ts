@@ -76,27 +76,31 @@ export function selectReplies(
   const latest = new Map<string, InboundReply>();
 
   for (const reply of replies) {
+    const from = reply.from.toLowerCase();
     const answersTarget = parseMessageIds(reply.references).some(
       (id) =>
         id.environment === target.environment &&
         id.exerciseId === target.exerciseId,
     );
 
-    if (!recipients.has(reply.from) || !answersTarget) {
+    if (!recipients.has(from) || !answersTarget) {
       continue;
     }
 
-    const current = latest.get(reply.from);
+    const current = latest.get(from);
 
-    if (!current || reply.receivedAt > current.receivedAt) {
-      latest.set(reply.from, reply);
+    // On equal times the message read later from the mailbox wins.
+    if (!current || reply.receivedAt >= current.receivedAt) {
+      latest.set(from, reply);
     }
   }
 
   return latest;
 }
 
-// Claude reads these formats, and the API rejects images over 5 MB.
+// Claude reads these formats, and the API rejects images over 5 MB. This
+// checks the decoded size; if the API still refuses an image, the grader
+// retries without images.
 const supportedImageTypes = new Set([
   "image/jpeg",
   "image/png",
@@ -106,25 +110,28 @@ const supportedImageTypes = new Set([
 const maxImages = 3;
 const maxImageBytes = 5 * 1024 * 1024;
 
+// The image attachments Claude can read, in order. Unsupported, too large and
+// surplus images count as skipped; other attachments are ignored.
 export function selectImages(
   attachments: Array<{ contentType: string; content: Uint8Array }>,
 ): { images: ReplyImage[]; skipped: number } {
-  const candidates = attachments.filter((attachment) =>
-    attachment.contentType.toLowerCase().startsWith("image/"),
-  );
+  const candidates = attachments
+    .map((attachment) => ({
+      mediaType: attachment.contentType.toLowerCase(),
+      content: attachment.content,
+    }))
+    .filter((attachment) => attachment.mediaType.startsWith("image/"));
   const images: ReplyImage[] = [];
 
-  for (const attachment of candidates) {
-    const mediaType = attachment.contentType.toLowerCase();
-
+  for (const { mediaType, content } of candidates) {
     if (
       images.length < maxImages &&
       supportedImageTypes.has(mediaType) &&
-      attachment.content.length <= maxImageBytes
+      content.length <= maxImageBytes
     ) {
       images.push({
         mediaType,
-        base64: Buffer.from(attachment.content).toString("base64"),
+        base64: Buffer.from(content).toString("base64"),
       });
     }
   }

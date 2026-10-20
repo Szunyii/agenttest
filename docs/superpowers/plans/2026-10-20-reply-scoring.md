@@ -25,6 +25,14 @@ Előzmény: `docs/superpowers/plans/2026-10-15-supabase-prisma-store.md` (a jele
 - A mag `fetchReplies(previous)` függősége már a kiválasztott válaszokat adja vissza (`Map<email, InboundReply>`); a job köti össze az IMAP-olvasást (`readReplies`) és a `selectReplies`-t. A mag nem kap `environment`-et; helyette `newMessageId(exerciseId)` és `warn(message, error)` függőséget kap.
 - Az `inbox.ts` exportja `readReplies` (nem `fetchReplies`), hogy ne ütközzön a mag függőségének nevével.
 
+**Végrehajtás közbeni módosítások** (a review-k nyomán; ahol eltér, a repó kódja a mérvadó):
+
+- **Task 2–3:** Prettier-tördelés; teszt a többsoros `References` fejlécre; a `selectReplies` maga is kisbetűsíti a feladót, és egyenlő időnél a később olvasott levél nyer; több teszt („a legutolsó nyer” mindkét sorrendben, vegyes hivatkozás, pontosan 5 MB). Tesztszám a 3. task után: 41.
+- **Task 4:** `prisma format` (csak igazítás).
+- **Task 5:** a `getScores` a `fetchReplies`-szal párhuzamosan fut; a tárolt pontszám akkor is megjelenik, ha a válasz már nincs a postafiókban vagy az IMAP nem érhető el; egy elbukott pontozási ág `scoring failed` figyelmeztetést ad; a `parseRecipients` kiszűri az ismétlődő címeket; a generálás késleltetve indul. Tesztszám az 5. task után: 57. A `tsc` az 5–7. task alatt a `mailer.ts`-ben is hibát jelez.
+- **Task 6:** 90 mp-es közös időkorlát a két kísérletre; a képek `file` részként mennek (az `image` rész elavult); 400-as képhiba esetén figyelmeztetés a logban (csak a hibaüzenet) és kép nélküli újrapróbálás; a válasz szövege nem zárhatja le a saját címkéjét, és legfeljebb 20 000 karakter; hat próbaeset (+ olvashatatlan kép).
+- **Task 8:** a job `warn`-ja csak a hibaüzenetet naplózza (`error instanceof Error ? error.message : error`), mert az AI SDK hibái a kérés törzsét (a válasz szövegét és képeit) is hordozzák; a build-ellenőrzésnél figyelni kell az imapflow által betöltött `pino`-ra.
+
 **Git:** a munka a `feature/reply-scoring` ágon folyik. Taskonként csak a felsorolt fájlokat add hozzá (`git add <fájlok>`), soha ne `git add -A`-t. A `.env.development.local` gitből kizárt; ne írd ki a tartalmát.
 
 **Typecheck:** az 5. task megváltoztatja a mag szerződését, ezért a `npx tsc` az 5–7. task után hibát ad a még régi `exercise-repository.ts` és `daily-exercise-job.ts` miatt. A 8. task végén lesz újra zöld. Közben a `npm test` az irányadó.

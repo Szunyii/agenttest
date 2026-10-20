@@ -1,4 +1,4 @@
-import { APICallError, generateText, Output } from "ai";
+import { APICallError, generateText, Output, RetryError } from "ai";
 import { anthropic } from "eve/models/anthropic";
 
 import z from "zod";
@@ -9,13 +9,16 @@ import type { InboundReply, ReplyImage } from "./replies";
 const model = "claude-sonnet-5-5";
 // Grading runs alongside generation (120 s) after the IMAP read (30 s), so
 // both branches end within about 120 s, before the 110 s delivery
-// transaction: the job stays under Vercel's 300 s.
+// transaction: the job stays under Vercel's 300 s. The deadline also covers
+// the text-only retry.
 const gradingTimeoutMs = 90_000;
+// The reply is untrusted text; a huge one would only overflow the prompt.
+const maxReplyChars = 20_000;
 
-// No min/max in the schema: structured output does not reliably enforce
-// numeric bounds, so the score is clamped below.
+// No bounds in the schema: structured output does not reliably enforce them,
+// so the score is rounded and clamped below.
 const gradeSchema = z.object({
-  score: z.number().int().describe("The score, from 0 to 10."),
+  score: z.number().describe("The score, an integer from 0 to 10."),
   feedback: z
     .string()
     .describe(
@@ -41,27 +44,40 @@ export async function gradeAnswer(
   exercise: ExerciseRecord,
   reply: InboundReply,
 ): Promise<Grade> {
+  const abortSignal = AbortSignal.timeout(gradingTimeoutMs);
+
   try {
     return await requestGrade(
       exercise,
       reply.text,
       reply.images,
       reply.skippedImages,
+      abortSignal,
     );
   } catch (error) {
+    // A 400 that follows a retried 429 or 5xx arrives wrapped in a RetryError.
+    const cause = RetryError.isInstance(error) ? error.lastError : error;
+
     // The API refuses some images that pass our checks (e.g. too large once
     // encoded, too many pixels, or not really an image); grade the text alone
     // rather than lose the whole grade.
     if (
       reply.images.length > 0 &&
-      APICallError.isInstance(error) &&
-      error.statusCode === 400
+      APICallError.isInstance(cause) &&
+      cause.statusCode === 400
     ) {
+      // Only the message: the error object also carries the request body.
+      console.warn(
+        "[grader] images rejected, grading text only:",
+        cause.message,
+      );
+
       return requestGrade(
         exercise,
         reply.text,
         [],
         reply.skippedImages + reply.images.length,
+        abortSignal,
       );
     }
 
@@ -74,21 +90,27 @@ async function requestGrade(
   text: string,
   images: ReplyImage[],
   skippedImages: number,
+  abortSignal: AbortSignal,
 ): Promise<Grade> {
   const notes = [
     images.length > 0
       ? `The student attached ${images.length} image(s), shown below.`
-      : "No image of the student's is shown.",
+      : "No student image is shown below.",
     ...(skippedImages > 0
       ? [
-          `${skippedImages} attached image(s) were not included (unsupported format, too large or more than 3); mention this in the feedback.`,
+          `${skippedImages} attached image(s) were not included (unsupported, unreadable, too large or more than 3); mention this in the feedback.`,
         ]
       : []),
   ];
+  // The reply must not close its own tag.
+  const replyText = text
+    .replaceAll("</student_reply>", "")
+    .trim()
+    .slice(0, maxReplyChars);
 
   const { output } = await generateText({
     model: anthropic(model),
-    abortSignal: AbortSignal.timeout(gradingTimeoutMs),
+    abortSignal,
     output: Output.object({ schema: gradeSchema }),
     system,
     messages: [
@@ -105,7 +127,7 @@ async function requestGrade(
               exercise.solution,
               "</reference_solution>",
               "<student_reply>",
-              text.trim() || "(empty)",
+              replyText || "(empty)",
               "</student_reply>",
               ...notes,
             ].join("\n"),

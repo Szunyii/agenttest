@@ -115,6 +115,9 @@ export function createExerciseRepository(
         // transaction and then fails with a unique violation.
         await prisma.$transaction(
           async (tx) => {
+            // Started with the transaction's own timer: the insert can wait on
+            // a parallel run's slot before it succeeds.
+            const sendDeadline = AbortSignal.timeout(sendDeadlineMs);
             const row = await tx.dailyExercise.create({
               data: {
                 environment,
@@ -127,7 +130,7 @@ export function createExerciseRepository(
               },
             });
             // The emails' Message-IDs carry the new row's id.
-            await send(buildMails(row.id), AbortSignal.timeout(sendDeadlineMs));
+            await send(buildMails(row.id), sendDeadline);
           },
           { timeout: transactionTimeoutMs, maxWait: transactionMaxWaitMs },
         );

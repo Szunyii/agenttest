@@ -225,8 +225,9 @@ async function scorePrevious(
       const reply = replies?.get(email);
       const known = stored.get(email);
 
-      // A rerun keeps an earlier run's score unless a newer reply arrived,
-      // even if the reply has left the inbox or the inbox is unreadable.
+      // A rerun keeps an earlier run's score unless a different reply is now
+      // the latest, even if the reply has left the inbox or the inbox is
+      // unreadable.
       if (known && (!reply || known.replyMessageId === reply.messageId)) {
         lines.set(recipient, {
           kind: "graded",

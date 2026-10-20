@@ -9,9 +9,13 @@ import {
   runDailyExercise,
   type DailyExerciseDeps,
   type ExerciseRecord,
+  type Grade,
   type NewExerciseRecord,
   type OutgoingMail,
+  type ScoreLine,
+  type StoredScore,
 } from "../agent/lib/daily-exercise.ts";
+import type { InboundReply } from "../agent/lib/replies.ts";
 
 const today = {
   difficulty: "medium",
@@ -20,15 +24,33 @@ const today = {
   solution: "Mai megoldás",
 };
 const previous: ExerciseRecord = {
+  id: 7,
   date: "2026-10-14",
+  createdAt: new Date("2026-10-14T07:00:03Z"),
   exercise: "Előző feladat szövege",
   solution: "Előző megoldás",
 };
+const graded: ScoreLine = { kind: "graded", score: 8, feedback: "Szép munka." };
+
+function reply(from: string): InboundReply {
+  return {
+    from,
+    messageId: `<reply-${from}>`,
+    references: ["<development.7.abc@napi-matek>"],
+    receivedAt: new Date("2026-10-14T18:00:00Z"),
+    text: "12 méter",
+    images: [],
+    skippedImages: 0,
+  };
+}
 
 function fakeDeps(overrides: Partial<DailyExerciseDeps> = {}) {
   const calls: string[] = [];
-  const delivered: Array<{ record: NewExerciseRecord; mail: OutgoingMail }> =
+  const delivered: Array<{ record: NewExerciseRecord; mails: OutgoingMail[] }> =
     [];
+  const saved: Array<{ exerciseId: number; email: string; grade: Grade }> = [];
+  const warnings: string[] = [];
+  let messageIds = 0;
   const deps: DailyExerciseDeps = {
     now: new Date("2026-10-15T07:05:00Z"), // 09:05 in Budapest (CEST)
     devMode: false,
@@ -37,19 +59,40 @@ function fakeDeps(overrides: Partial<DailyExerciseDeps> = {}) {
       calls.push("getPrevious");
       return previous;
     },
+    fetchReplies: async () => {
+      calls.push("fetchReplies");
+      return new Map([["a@example.com", reply("a@example.com")]]);
+    },
+    getScores: async () => {
+      calls.push("getScores");
+      return new Map<string, StoredScore>();
+    },
+    grade: async (_previous, answer) => {
+      calls.push(`grade:${answer.from}`);
+      return { score: 8, feedback: "Szép munka." };
+    },
+    saveScore: async (exerciseId, email, _answer, grade) => {
+      calls.push(`saveScore:${email}`);
+      saved.push({ exerciseId, email, grade });
+    },
     generate: async () => {
       calls.push("generate");
       return today;
     },
-    deliver: async (record, mail) => {
+    newMessageId: (exerciseId) =>
+      `<test.${exerciseId}.${++messageIds}@napi-matek>`,
+    deliver: async (record, buildMails) => {
       calls.push("deliver");
-      delivered.push({ record, mail });
+      delivered.push({ record, mails: buildMails(8) });
       return "sent";
+    },
+    warn: (message) => {
+      warnings.push(message);
     },
     ...overrides,
   };
 
-  return { deps, calls, delivered };
+  return { deps, calls, delivered, saved, warnings };
 }
 
 describe("budapestClock", () => {
@@ -132,68 +175,258 @@ describe("resolveRunMode", () => {
 });
 
 describe("composeEmail", () => {
-  it("puts the previous solution before today's exercise", () => {
-    const mail = composeEmail(previous, today, "2026-10-15");
+  it("puts the previous solution and the score before today's exercise", () => {
+    const mail = composeEmail(previous, graded, today, "2026-10-15");
+    const solutionAt = mail.text.indexOf("Megoldás: Előző megoldás");
+    const scoreAt = mail.text.indexOf("Pontszámod: 8/10\nSzép munka.");
+    const todayAt = mail.text.indexOf("Mai feladat szövege");
 
     assert.equal(mail.subject, "Napi matekfeladat – 2026. 10. 15.");
-    assert.ok(mail.text.includes("Előző feladat szövege"));
-    assert.ok(mail.text.includes("Megoldás: Előző megoldás"));
     assert.ok(
-      mail.text.indexOf("Előző megoldás") <
-        mail.text.indexOf("Mai feladat szövege"),
+      mail.text.includes(
+        "Az előző feladat\n----------------\nElőző feladat szövege",
+      ),
+    );
+    assert.ok(solutionAt >= 0 && solutionAt < scoreAt && scoreAt < todayAt);
+  });
+
+  it("says when no solution was sent", () => {
+    const mail = composeEmail(previous, { kind: "none" }, today, "2026-10-15");
+
+    assert.ok(mail.text.includes("Erre a feladatra nem küldtél megoldást."));
+  });
+
+  it("says when the score could not be determined", () => {
+    const mail = composeEmail(
+      previous,
+      { kind: "unknown" },
+      today,
+      "2026-10-15",
+    );
+
+    assert.ok(
+      mail.text.includes("A pontszámot most nem sikerült megállapítani."),
     );
   });
 
   it("never reveals today's solution", () => {
-    const mail = composeEmail(previous, today, "2026-10-15");
+    const mail = composeEmail(previous, graded, today, "2026-10-15");
 
     assert.ok(!mail.text.includes("Mai megoldás"));
   });
 
-  it("leaves out the previous block on the first day", () => {
-    const mail = composeEmail(null, today, "2026-10-15");
+  it("leaves out the previous block and the score on the first day", () => {
+    const mail = composeEmail(null, { kind: "none" }, today, "2026-10-15");
 
-    assert.ok(!mail.text.includes("Az előző feladat megoldása"));
+    assert.ok(!mail.text.includes("Az előző feladat"));
+    assert.ok(!mail.text.includes("nem küldtél"));
     assert.ok(mail.text.includes("Mai feladat szövege"));
+  });
+
+  it("asks for the solution as a reply", () => {
+    const mail = composeEmail(previous, graded, today, "2026-10-15");
+
+    assert.ok(mail.text.includes("Válaszolj erre a levélre a megoldásoddal"));
   });
 });
 
 describe("runDailyExercise", () => {
-  it("generates and delivers at 9 in Budapest", async () => {
-    const { deps, calls, delivered } = fakeDeps();
+  it("delivers one personalised email per recipient at 9 in Budapest", async () => {
+    const { deps, delivered } = fakeDeps();
 
     assert.equal(await runDailyExercise(deps), "sent");
-    assert.deepEqual(calls, ["getPrevious", "generate", "deliver"]);
     assert.deepEqual(delivered[0].record, {
       slot: "2026-10-15",
       date: "2026-10-15",
       ...today,
     });
-    assert.deepEqual(delivered[0].mail.bcc, ["a@example.com", "b@example.com"]);
-    assert.ok(delivered[0].mail.text.includes("Megoldás: Előző megoldás"));
-    assert.ok(delivered[0].mail.text.includes("Mai feladat szövege"));
-    assert.ok(!delivered[0].mail.text.includes("Mai megoldás"));
+
+    const mails = delivered[0].mails;
+
+    assert.deepEqual(
+      mails.map((mail) => mail.to),
+      ["a@example.com", "b@example.com"],
+    );
+    assert.deepEqual(
+      mails.map((mail) => mail.messageId),
+      ["<test.8.1@napi-matek>", "<test.8.2@napi-matek>"],
+    );
+    assert.ok(mails[0].text.includes("Pontszámod: 8/10\nSzép munka."));
+    assert.ok(
+      mails[1].text.includes("Erre a feladatra nem küldtél megoldást."),
+    );
+
+    for (const mail of mails) {
+      assert.equal(mail.subject, "Napi matekfeladat – 2026. 10. 15.");
+      assert.ok(mail.text.includes("Megoldás: Előző megoldás"));
+      assert.ok(mail.text.includes("Mai feladat szövege"));
+      assert.ok(!mail.text.includes("Mai megoldás"));
+    }
   });
 
-  it("sends the first email without a previous block", async () => {
-    const { deps, delivered } = fakeDeps({ getPrevious: async () => null });
+  it("saves each new grade for the previous exercise", async () => {
+    const { deps, calls, saved } = fakeDeps();
+
+    await runDailyExercise(deps);
+
+    assert.ok(calls.includes("grade:a@example.com"));
+    assert.deepEqual(saved, [
+      {
+        exerciseId: 7,
+        email: "a@example.com",
+        grade: { score: 8, feedback: "Szép munka." },
+      },
+    ]);
+  });
+
+  it("reuses a stored score for the same reply", async () => {
+    const { deps, calls, saved, delivered } = fakeDeps({
+      getScores: async () =>
+        new Map([
+          [
+            "a@example.com",
+            {
+              replyMessageId: "<reply-a@example.com>",
+              score: 5,
+              feedback: "Régi értékelés.",
+            },
+          ],
+        ]),
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(!calls.includes("grade:a@example.com"));
+    assert.deepEqual(saved, []);
+    assert.ok(
+      delivered[0].mails[0].text.includes("Pontszámod: 5/10\nRégi értékelés."),
+    );
+  });
+
+  it("regrades when a newer reply arrived", async () => {
+    const { deps, calls, saved } = fakeDeps({
+      getScores: async () =>
+        new Map([
+          [
+            "a@example.com",
+            {
+              replyMessageId: "<older@icloud.com>",
+              score: 5,
+              feedback: "Régi.",
+            },
+          ],
+        ]),
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(calls.includes("grade:a@example.com"));
+    assert.equal(saved.length, 1);
+  });
+
+  it("sends without scores when reading replies fails", async () => {
+    const { deps, calls, delivered, warnings } = fakeDeps({
+      fetchReplies: async () => {
+        throw new Error("IMAP down");
+      },
+    });
 
     assert.equal(await runDailyExercise(deps), "sent");
-    assert.ok(!delivered[0].mail.text.includes("Az előző feladat megoldása"));
-    assert.ok(delivered[0].mail.text.includes("Mai feladat szövege"));
+    assert.ok(!calls.some((call) => call.startsWith("grade:")));
+    assert.deepEqual(warnings, ["[daily-exercise] reading replies failed"]);
+
+    for (const mail of delivered[0].mails) {
+      assert.ok(
+        mail.text.includes("A pontszámot most nem sikerült megállapítani."),
+      );
+    }
   });
 
-  for (const [now, expected, expectedCalls] of [
-    ["2026-12-01T07:30:00Z", "skipped-hour", []], // 08:30 in Budapest (CET)
-    ["2026-12-01T08:59:00Z", "sent", ["getPrevious", "generate", "deliver"]], // 09:59 (CET)
-    ["2026-07-01T07:59:00Z", "sent", ["getPrevious", "generate", "deliver"]], // 09:59 (CEST)
-    ["2026-07-01T08:00:00Z", "skipped-hour", []], // 10:00 in Budapest (CEST)
+  it("marks only the failed grade as unknown", async () => {
+    const { deps, delivered, saved, warnings } = fakeDeps({
+      fetchReplies: async () =>
+        new Map([
+          ["a@example.com", reply("a@example.com")],
+          ["b@example.com", reply("b@example.com")],
+        ]),
+      grade: async (_previous, answer) => {
+        if (answer.from === "b@example.com") {
+          throw new Error("Claude down");
+        }
+
+        return { score: 8, feedback: "Szép munka." };
+      },
+    });
+
+    assert.equal(await runDailyExercise(deps), "sent");
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+    assert.ok(
+      delivered[0].mails[1].text.includes(
+        "A pontszámot most nem sikerült megállapítani.",
+      ),
+    );
+    assert.deepEqual(
+      saved.map((item) => item.email),
+      ["a@example.com"],
+    );
+    assert.deepEqual(warnings, [
+      "[daily-exercise] grading b@example.com failed",
+    ]);
+  });
+
+  it("still uses a grade whose saving failed", async () => {
+    const { deps, delivered, warnings } = fakeDeps({
+      saveScore: async () => {
+        throw new Error("DB down");
+      },
+    });
+
+    assert.equal(await runDailyExercise(deps), "sent");
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+    assert.deepEqual(warnings, [
+      "[daily-exercise] saving the score of a@example.com failed",
+    ]);
+  });
+
+  it("matches recipients to replies case-insensitively", async () => {
+    const { deps, delivered, saved } = fakeDeps({
+      recipients: ["A@Example.com"],
+    });
+
+    await runDailyExercise(deps);
+
+    assert.equal(delivered[0].mails[0].to, "A@Example.com");
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+    assert.equal(saved[0].email, "a@example.com");
+  });
+
+  it("sends the first email without a previous block and reads no replies", async () => {
+    const { deps, calls, delivered } = fakeDeps({
+      getPrevious: async () => null,
+    });
+
+    assert.equal(await runDailyExercise(deps), "sent");
+    assert.ok(!calls.includes("fetchReplies"));
+    assert.ok(!delivered[0].mails[0].text.includes("Az előző feladat"));
+    assert.ok(delivered[0].mails[0].text.includes("Mai feladat szövege"));
+  });
+
+  for (const [now, expected] of [
+    ["2026-12-01T07:30:00Z", "skipped-hour"], // 08:30 in Budapest (CET)
+    ["2026-12-01T08:59:00Z", "sent"], // 09:59 (CET)
+    ["2026-07-01T07:59:00Z", "sent"], // 09:59 (CEST)
+    ["2026-07-01T08:00:00Z", "skipped-hour"], // 10:00 in Budapest (CEST)
   ] as const) {
     it(`returns ${expected} at ${now}`, async () => {
       const { deps, calls } = fakeDeps({ now: new Date(now) });
 
       assert.equal(await runDailyExercise(deps), expected);
-      assert.deepEqual(calls, expectedCalls);
+
+      if (expected === "skipped-hour") {
+        assert.deepEqual(calls, []);
+      } else {
+        assert.ok(calls.includes("deliver"));
+      }
     });
   }
 
@@ -245,6 +478,6 @@ describe("runDailyExercise", () => {
     assert.equal(await runDailyExercise(deps), "sent");
     assert.equal(delivered[0].record.slot, "2026-10-15T12:00:00.000Z");
     assert.equal(delivered[0].record.date, "2026-10-15");
-    assert.ok(delivered[0].mail.text.includes("Megoldás: Előző megoldás"));
+    assert.ok(delivered[0].mails[0].text.includes("Megoldás: Előző megoldás"));
   });
 });

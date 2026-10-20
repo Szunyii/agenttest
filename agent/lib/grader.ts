@@ -111,9 +111,9 @@ async function requestGrade(
             ].join("\n"),
           },
           ...images.map((image) => ({
-            type: "image" as const,
-            image: image.base64,
+            type: "file" as const,
             mediaType: image.mediaType,
+            data: image.base64,
           })),
         ],
       },

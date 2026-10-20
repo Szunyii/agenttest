@@ -134,6 +134,13 @@ describe("parseRecipients", () => {
   it("throws when no address is given", () => {
     assert.throws(() => parseRecipients(" , "), /EXERCISE_RECIPIENTS/);
   });
+
+  it("drops repeated addresses, ignoring letter case", () => {
+    assert.deepEqual(
+      parseRecipients("a@example.com, A@Example.com, b@example.com"),
+      ["a@example.com", "b@example.com"],
+    );
+  });
 });
 
 describe("resolveRunMode", () => {
@@ -304,7 +311,7 @@ describe("runDailyExercise", () => {
   });
 
   it("regrades when a newer reply arrived", async () => {
-    const { deps, calls, saved } = fakeDeps({
+    const { deps, calls, saved, delivered } = fakeDeps({
       getScores: async () =>
         new Map([
           [
@@ -322,6 +329,7 @@ describe("runDailyExercise", () => {
 
     assert.ok(calls.includes("grade:a@example.com"));
     assert.equal(saved.length, 1);
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
   });
 
   it("sends without scores when reading replies fails", async () => {
@@ -386,6 +394,93 @@ describe("runDailyExercise", () => {
     assert.deepEqual(warnings, [
       "[daily-exercise] saving the score of a@example.com failed",
     ]);
+  });
+
+  it("regrades when loading the stored scores fails", async () => {
+    const { deps, calls, saved, delivered, warnings } = fakeDeps({
+      getScores: async () => {
+        throw new Error("DB down");
+      },
+    });
+
+    assert.equal(await runDailyExercise(deps), "sent");
+    assert.ok(calls.includes("grade:a@example.com"));
+    assert.equal(saved.length, 1);
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+    assert.deepEqual(warnings, ["[daily-exercise] loading scores failed"]);
+  });
+
+  it("keeps a stored score when the reply has left the inbox", async () => {
+    const { deps, calls, delivered } = fakeDeps({
+      fetchReplies: async () => new Map(),
+      getScores: async () =>
+        new Map([
+          [
+            "a@example.com",
+            {
+              replyMessageId: "<reply-a@example.com>",
+              score: 5,
+              feedback: "Régi értékelés.",
+            },
+          ],
+        ]),
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(!calls.some((call) => call.startsWith("grade:")));
+    assert.ok(
+      delivered[0].mails[0].text.includes("Pontszámod: 5/10\nRégi értékelés."),
+    );
+    assert.ok(
+      delivered[0].mails[1].text.includes(
+        "Erre a feladatra nem küldtél megoldást.",
+      ),
+    );
+  });
+
+  it("keeps stored scores when reading replies fails", async () => {
+    const { deps, delivered } = fakeDeps({
+      fetchReplies: async () => {
+        throw new Error("IMAP down");
+      },
+      getScores: async () =>
+        new Map([
+          [
+            "a@example.com",
+            {
+              replyMessageId: "<reply-a@example.com>",
+              score: 5,
+              feedback: "Régi értékelés.",
+            },
+          ],
+        ]),
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 5/10"));
+    assert.ok(
+      delivered[0].mails[1].text.includes(
+        "A pontszámot most nem sikerült megállapítani.",
+      ),
+    );
+  });
+
+  it("warns and sends without scores when scoring itself breaks", async () => {
+    const { deps, delivered, warnings } = fakeDeps({
+      // A broken dependency makes scoring reject despite its own guards.
+      getScores: async () => undefined as unknown as Map<string, StoredScore>,
+    });
+
+    assert.equal(await runDailyExercise(deps), "sent");
+    assert.deepEqual(warnings, ["[daily-exercise] scoring failed"]);
+
+    for (const mail of delivered[0].mails) {
+      assert.ok(
+        mail.text.includes("A pontszámot most nem sikerült megállapítani."),
+      );
+    }
   });
 
   it("matches recipients to replies case-insensitively", async () => {
@@ -456,6 +551,21 @@ describe("runDailyExercise", () => {
 
     await assert.rejects(runDailyExercise(deps), /Claude down/);
     assert.deepEqual(delivered, []);
+  });
+
+  it("finishes saving grades before a failed generation rejects", async () => {
+    const { deps, saved } = fakeDeps({
+      generate: async () => {
+        throw new Error("Claude down");
+      },
+      grade: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { score: 8, feedback: "Szép munka." };
+      },
+    });
+
+    await assert.rejects(runDailyExercise(deps), /Claude down/);
+    assert.equal(saved.length, 1);
   });
 
   it("propagates delivery failures", async () => {

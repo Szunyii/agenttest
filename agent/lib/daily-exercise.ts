@@ -54,6 +54,7 @@ export interface DailyExerciseDeps {
   fetchReplies: (
     previous: ExerciseRecord,
   ) => Promise<Map<string, InboundReply>>;
+  // Stored scores of an exercise, keyed by the lowercased address.
   getScores: (exerciseId: number) => Promise<Map<string, StoredScore>>;
   grade: (previous: ExerciseRecord, reply: InboundReply) => Promise<Grade>;
   saveScore: (
@@ -122,10 +123,21 @@ export function budapestClock(at: Date): { date: string; hour: number } {
 }
 
 export function parseRecipients(value: string): string[] {
+  // A repeated address would get two emails and two racing grades.
+  const seen = new Set<string>();
   const recipients = value
     .split(",")
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter((item) => {
+      const key = item.toLowerCase();
+
+      if (!item || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
 
   if (recipients.length === 0) {
     throw new Error(
@@ -180,55 +192,53 @@ export function composeEmail(
   };
 }
 
-// Never rejects: a recipient whose reply cannot be read or graded gets an
-// "unknown" line, because today's exercise matters more than the score.
+// Designed not to reject: a recipient whose reply cannot be read or graded gets
+// an "unknown" line, because today's exercise matters more than the score.
 async function scorePrevious(
   deps: DailyExerciseDeps,
   previous: ExerciseRecord,
 ): Promise<Map<string, ScoreLine>> {
   const lines = new Map<string, ScoreLine>();
-  let replies: Map<string, InboundReply>;
+  const [fetched, loaded] = await Promise.allSettled([
+    deps.fetchReplies(previous),
+    deps.getScores(previous.id),
+  ]);
 
-  try {
-    replies = await deps.fetchReplies(previous);
-  } catch (error) {
-    deps.warn("[daily-exercise] reading replies failed", error);
-
-    for (const recipient of deps.recipients) {
-      lines.set(recipient, { kind: "unknown" });
-    }
-
-    return lines;
+  if (fetched.status === "rejected") {
+    deps.warn("[daily-exercise] reading replies failed", fetched.reason);
   }
 
-  let stored = new Map<string, StoredScore>();
-
-  try {
-    stored = await deps.getScores(previous.id);
-  } catch (error) {
+  if (loaded.status === "rejected") {
     // Only costs a regrade.
-    deps.warn("[daily-exercise] loading scores failed", error);
+    deps.warn("[daily-exercise] loading scores failed", loaded.reason);
   }
+
+  const replies = fetched.status === "fulfilled" ? fetched.value : null;
+  const stored =
+    loaded.status === "fulfilled"
+      ? loaded.value
+      : new Map<string, StoredScore>();
 
   await Promise.all(
     deps.recipients.map(async (recipient) => {
       const email = recipient.toLowerCase();
-      const reply = replies.get(email);
-
-      if (!reply) {
-        lines.set(recipient, { kind: "none" });
-        return;
-      }
-
+      const reply = replies?.get(email);
       const known = stored.get(email);
 
-      // A rerun keeps the score of a reply it has already graded.
-      if (known?.replyMessageId === reply.messageId) {
+      // A rerun keeps an earlier run's score unless a newer reply arrived,
+      // even if the reply has left the inbox or the inbox is unreadable.
+      if (known && (!reply || known.replyMessageId === reply.messageId)) {
         lines.set(recipient, {
           kind: "graded",
           score: known.score,
           feedback: known.feedback,
         });
+        return;
+      }
+
+      if (!reply) {
+        // Without the inbox we cannot tell whether a reply arrived.
+        lines.set(recipient, { kind: replies ? "none" : "unknown" });
         return;
       }
 
@@ -281,8 +291,13 @@ export async function runDailyExercise(
     previous
       ? scorePrevious(deps, previous)
       : Promise.resolve(new Map<string, ScoreLine>()),
-    deps.generate(),
+    // Deferred, so even a synchronous throw waits for scoring to settle.
+    Promise.resolve().then(() => deps.generate()),
   ]);
+
+  if (scoring.status === "rejected") {
+    deps.warn("[daily-exercise] scoring failed", scoring.reason);
+  }
 
   if (generation.status === "rejected") {
     throw generation.reason;

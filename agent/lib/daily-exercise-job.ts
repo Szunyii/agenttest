@@ -7,7 +7,10 @@ import {
 import { createPrisma } from "./db";
 import { generateExercise } from "./exercise";
 import { createExerciseRepository } from "./exercise-repository";
-import { sendMail } from "./mailer";
+import { gradeAnswer } from "./grader";
+import { readReplies } from "./inbox";
+import { sendMails } from "./mailer";
+import { buildMessageId, selectReplies } from "./replies";
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -31,8 +34,10 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
     };
     const recipients = parseRecipients(requireEnv("EXERCISE_RECIPIENTS"));
     prisma = createPrisma();
-    const repository = createExerciseRepository(prisma, environment, (mail) =>
-      sendMail(credentials, mail),
+    const repository = createExerciseRepository(
+      prisma,
+      environment,
+      (mails, signal) => sendMails(credentials, mails, signal),
     );
 
     const result = await runDailyExercise({
@@ -40,9 +45,23 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       devMode,
       recipients,
       getPrevious: repository.getPrevious,
+      fetchReplies: async (previous) =>
+        selectReplies(await readReplies(credentials, previous.createdAt), {
+          environment,
+          exerciseId: previous.id,
+          recipients,
+        }),
+      getScores: repository.getScores,
+      grade: gradeAnswer,
+      saveScore: repository.saveScore,
       generate: () =>
         generateExercise({ difficulty: "medium", topic: "word_problem" }),
+      newMessageId: (exerciseId) => buildMessageId(environment, exerciseId),
       deliver: repository.deliver,
+      // Only the message: AI SDK errors also carry the request body, i.e. the
+      // student's reply text and images.
+      warn: (message, error) =>
+        console.warn(message, error instanceof Error ? error.message : error),
     });
 
     console.log(`[daily-exercise] ${environment}: ${result}`);
@@ -54,8 +73,10 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
   } finally {
     // Close this run's own client: a once-a-day job gains nothing from pooling,
     // and an idle socket could go stale while the instance is suspended.
-    await prisma?.$disconnect().catch((error) =>
-      console.warn("[daily-exercise] disconnect failed", error),
-    );
+    await prisma
+      ?.$disconnect()
+      .catch((error) =>
+        console.warn("[daily-exercise] disconnect failed", error),
+      );
   }
 }

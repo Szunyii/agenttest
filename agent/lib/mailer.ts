@@ -19,6 +19,9 @@ export async function sendMails(
     service: "gmail",
     pool: true,
     maxConnections: 1,
+    // A requeued send could outlast the delivery transaction or repeat an
+    // accepted email; a failed send rolls back instead.
+    maxRequeues: 0,
     auth: { user: credentials.user, pass: credentials.appPassword },
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,

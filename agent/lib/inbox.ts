@@ -6,8 +6,8 @@ import {
   answersExercise,
   isAutoReply,
   selectImages,
-  type ExerciseRef,
   type InboundReply,
+  type ReplyTarget,
 } from "./replies";
 
 // Bounds the whole read, logout included, so a stalled IMAP server cannot eat
@@ -15,16 +15,16 @@ import {
 const readTimeoutMs = 30_000;
 const dayMs = 24 * 60 * 60 * 1000;
 
-// Reads the replies to our emails about `exercise` that arrived since `since`.
-// The mailbox is opened read-only, so nothing is marked as read or otherwise
-// changed.
+// Reads the newest reply of each recipient to our emails about the target
+// exercise, from mail received since about `since`. The mailbox is opened
+// read-only, so nothing is marked as read or otherwise changed.
 export async function readReplies(
   credentials: MailCredentials,
   since: Date,
-  exercise: ExerciseRef,
+  target: ReplyTarget,
 ): Promise<InboundReply[]> {
   try {
-    return await readInbox(credentials, since, exercise);
+    return await readInbox(credentials, since, target);
   } catch (error) {
     throw describeImapError(error);
   }
@@ -33,7 +33,7 @@ export async function readReplies(
 async function readInbox(
   credentials: MailCredentials,
   since: Date,
-  exercise: ExerciseRef,
+  target: ReplyTarget,
 ): Promise<InboundReply[]> {
   const client = new ImapFlow({
     host: "imap.gmail.com",
@@ -62,7 +62,8 @@ async function readInbox(
 
     try {
       // IMAP SINCE compares whole days in the server's time zone, so search
-      // from a day earlier and apply the exact cut-off here.
+      // from a day earlier; the exercise id in the references does the exact
+      // matching.
       const messages = await client.fetchAll(
         { since: new Date(since.getTime() - dayMs) },
         {
@@ -72,24 +73,40 @@ async function readInbox(
           headers: ["references", "auto-submitted"],
         },
       );
-      const replies: InboundReply[] = [];
+      // Download only the newest human reply of each recipient to this
+      // exercise, so earlier attempts cannot eat the time budget;
+      // selectReplies makes the same choice from the parsed mail.
+      const recipients = new Set(
+        target.recipients.map((recipient) => recipient.toLowerCase()),
+      );
+      const newest = new Map<string, { uid: number; receivedAt: Date }>();
 
       for (const message of messages) {
+        const from = (message.envelope?.from?.[0]?.address ?? "").toLowerCase();
         const receivedAt = new Date(message.internalDate ?? 0);
         const headers = message.headers?.toString("utf8") ?? "";
         const references = [message.envelope?.inReplyTo ?? "", headers];
 
-        // Download only human replies to this exercise.
         if (
-          receivedAt < since ||
+          !recipients.has(from) ||
           isAutoReply(headers) ||
-          !answersExercise(references, exercise)
+          !answersExercise(references, target)
         ) {
           continue;
         }
 
+        const current = newest.get(from);
+
+        if (!current || receivedAt >= current.receivedAt) {
+          newest.set(from, { uid: message.uid, receivedAt });
+        }
+      }
+
+      const replies: InboundReply[] = [];
+
+      for (const { uid, receivedAt } of newest.values()) {
         const full = await client.fetchOne(
-          String(message.uid),
+          String(uid),
           { source: true },
           { uid: true },
         );
@@ -97,7 +114,7 @@ async function readInbox(
         // `false` means the message was deleted meanwhile; a lost connection
         // is caught below.
         if (full && full.source) {
-          replies.push(await parseReply(full.source, receivedAt, message.uid));
+          replies.push(await parseReply(full.source, receivedAt, uid));
         }
       }
 

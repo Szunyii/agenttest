@@ -7,6 +7,15 @@ export interface ReplyImage {
   base64: string;
 }
 
+// Why image attachments were left out of the grading request.
+export interface ImageSkips {
+  // Not JPEG, PNG, GIF or WebP, e.g. HEIC.
+  unsupported: number;
+  tooLarge: number;
+  // Beyond the first few images.
+  surplus: number;
+}
+
 export interface InboundReply {
   // The sender's address, lowercased.
   from: string;
@@ -16,8 +25,8 @@ export interface InboundReply {
   receivedAt: Date;
   text: string;
   images: ReplyImage[];
-  // Image attachments left out: unsupported format, too large or over the limit.
-  skippedImages: number;
+  // Image attachments left out, by reason.
+  skippedImages: ImageSkips;
 }
 
 export interface ExerciseRef {
@@ -113,9 +122,9 @@ export function selectReplies(
   return latest;
 }
 
-// Claude reads these formats, and the API rejects images over 5 MB. This
-// checks the decoded size; if the API still refuses an image, the grader
-// retries without images.
+// Claude reads these formats. The API takes images up to 10 MB each and
+// requests up to 32 MB, both measured as base64; if it still refuses an image,
+// the grader retries without images.
 const supportedImageTypes = new Set([
   "image/jpeg",
   "image/png",
@@ -123,33 +132,52 @@ const supportedImageTypes = new Set([
   "image/webp",
 ]);
 const maxImages = 3;
-const maxImageBytes = 5 * 1024 * 1024;
+const maxImageBase64Chars = 10 * 1024 * 1024;
+const maxTotalBase64Chars = 24 * 1024 * 1024;
 
-// The image attachments Claude can read, in order. Unsupported, too large and
-// surplus images count as skipped; other attachments are ignored.
+// The image attachments Claude can read, in order, and why the others were
+// left out; attachments that are not images are ignored.
 export function selectImages(
   attachments: Array<{ contentType: string; content: Uint8Array }>,
-): { images: ReplyImage[]; skipped: number } {
-  const candidates = attachments
-    .map((attachment) => ({
-      mediaType: attachment.contentType.toLowerCase(),
-      content: attachment.content,
-    }))
-    .filter((attachment) => attachment.mediaType.startsWith("image/"));
+): { images: ReplyImage[]; skipped: ImageSkips } {
   const images: ReplyImage[] = [];
+  const skipped: ImageSkips = { unsupported: 0, tooLarge: 0, surplus: 0 };
+  let totalChars = 0;
 
-  for (const { mediaType, content } of candidates) {
-    if (
-      images.length < maxImages &&
-      supportedImageTypes.has(mediaType) &&
-      content.length <= maxImageBytes
-    ) {
-      images.push({
-        mediaType,
-        base64: Buffer.from(content).toString("base64"),
-      });
+  for (const attachment of attachments) {
+    const mediaType = attachment.contentType.toLowerCase();
+
+    if (!mediaType.startsWith("image/")) {
+      continue;
     }
+
+    if (!supportedImageTypes.has(mediaType)) {
+      skipped.unsupported += 1;
+      continue;
+    }
+
+    if (images.length === maxImages) {
+      skipped.surplus += 1;
+      continue;
+    }
+
+    // The base64 size, without encoding an image we may not keep.
+    const base64Chars = Math.ceil(attachment.content.length / 3) * 4;
+
+    if (
+      base64Chars > maxImageBase64Chars ||
+      totalChars + base64Chars > maxTotalBase64Chars
+    ) {
+      skipped.tooLarge += 1;
+      continue;
+    }
+
+    images.push({
+      mediaType,
+      base64: Buffer.from(attachment.content).toString("base64"),
+    });
+    totalChars += base64Chars;
   }
 
-  return { images, skipped: candidates.length - images.length };
+  return { images, skipped };
 }

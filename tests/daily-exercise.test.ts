@@ -40,7 +40,7 @@ function reply(from: string): InboundReply {
     receivedAt: new Date("2026-10-14T18:00:00Z"),
     text: "12 méter",
     images: [],
-    skippedImages: 0,
+    skippedImages: { unsupported: 0, tooLarge: 0, surplus: 0 },
   };
 }
 

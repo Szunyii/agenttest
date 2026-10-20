@@ -19,7 +19,7 @@ function reply(overrides: Partial<InboundReply> = {}): InboundReply {
     receivedAt: new Date("2026-10-14T18:00:00Z"),
     text: "12 méter",
     images: [],
-    skippedImages: 0,
+    skippedImages: { unsupported: 0, tooLarge: 0, surplus: 0 },
     ...overrides,
   };
 }
@@ -200,6 +200,7 @@ describe("selectImages", () => {
     contentType,
     content: Buffer.alloc(bytes, 1),
   });
+  const none = { unsupported: 0, tooLarge: 0, surplus: 0 };
 
   it("keeps supported images as base64", () => {
     const { images, skipped } = selectImages([
@@ -212,13 +213,13 @@ describe("selectImages", () => {
       ["image/jpeg", "image/png"],
     );
     assert.equal(images[0].base64, Buffer.alloc(3, 1).toString("base64"));
-    assert.equal(skipped, 0);
+    assert.deepEqual(skipped, none);
   });
 
-  it("skips unsupported, too large and surplus images", () => {
+  it("sorts out unsupported, too large and surplus images", () => {
     const { images, skipped } = selectImages([
       image("image/heic"),
-      image("image/jpeg", 5 * 1024 * 1024 + 1),
+      image("image/jpeg", 7_864_323), // just over 10 MB as base64
       image("image/png"),
       image("image/gif"),
       image("image/webp"),
@@ -229,22 +230,34 @@ describe("selectImages", () => {
       images.map((item) => item.mediaType),
       ["image/png", "image/gif", "image/webp"],
     );
-    assert.equal(skipped, 3);
+    assert.deepEqual(skipped, { unsupported: 1, tooLarge: 1, surplus: 1 });
   });
 
-  it("accepts an image of exactly 5 MB", () => {
+  it("accepts an image right at the per-image limit", () => {
     const { images, skipped } = selectImages([
-      image("image/jpeg", 5 * 1024 * 1024),
+      image("image/jpeg", 7_864_320), // exactly 10 MB as base64
     ]);
 
     assert.equal(images.length, 1);
-    assert.equal(skipped, 0);
+    assert.deepEqual(skipped, none);
+  });
+
+  it("caps the total size of the images", () => {
+    const nineMegabytes = 7_077_888; // 9 MB as base64
+    const { images, skipped } = selectImages([
+      image("image/jpeg", nineMegabytes),
+      image("image/jpeg", nineMegabytes),
+      image("image/jpeg", nineMegabytes),
+    ]);
+
+    assert.equal(images.length, 2);
+    assert.deepEqual(skipped, { unsupported: 0, tooLarge: 1, surplus: 0 });
   });
 
   it("ignores attachments that are not images", () => {
     const { images, skipped } = selectImages([image("application/pdf")]);
 
     assert.deepEqual(images, []);
-    assert.equal(skipped, 0);
+    assert.deepEqual(skipped, none);
   });
 });

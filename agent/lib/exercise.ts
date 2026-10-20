@@ -16,7 +16,8 @@ export type Topic = (typeof topics)[number];
 
 const model = "claude-sonnet-5-5";
 // Bounds a stalled Claude call so the daily job stays well inside the
-// function's max duration (generation + a 90 s transaction < 300 s).
+// function's max duration (generation, alongside reading and grading the
+// replies, + a 110 s delivery transaction < 300 s).
 const generationTimeoutMs = 120_000;
 
 const difficultyHints: Record<Difficulty, string> = {

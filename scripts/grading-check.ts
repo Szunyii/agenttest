@@ -63,7 +63,7 @@ for (const { name, text, images = [], range } of cases) {
     receivedAt: new Date(),
     text,
     images,
-    skippedImages: 0,
+    skippedImages: { unsupported: 0, tooLarge: 0, surplus: 0 },
   };
   const grade = await gradeAnswer(exercise, reply);
   const ok = grade.score >= range[0] && grade.score <= range[1];

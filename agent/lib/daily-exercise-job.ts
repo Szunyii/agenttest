@@ -45,14 +45,14 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       devMode,
       recipients,
       getPrevious: repository.getPrevious,
-      fetchReplies: async (previous) =>
-        selectReplies(
-          await readReplies(credentials, previous.createdAt, {
-            environment,
-            exerciseId: previous.id,
-          }),
-          { environment, exerciseId: previous.id, recipients },
-        ),
+      fetchReplies: async (previous) => {
+        const target = { environment, exerciseId: previous.id, recipients };
+
+        return selectReplies(
+          await readReplies(credentials, previous.createdAt, target),
+          target,
+        );
+      },
       getScores: repository.getScores,
       grade: gradeAnswer,
       saveScore: repository.saveScore,

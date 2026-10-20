@@ -14,16 +14,16 @@ enum Environment {
 }
 
 model DailyExercise {
-  id          Int         @id @default(autoincrement())
+  id          Int          @id @default(autoincrement())
   environment Environment
   // The Budapest date (one email per day per environment); in dev mode an ISO timestamp.
   slot        String
-  date        DateTime    @db.Date
+  date        DateTime     @db.Date
   difficulty  String
   topic       String
   exercise    String
   solution    String
-  createdAt   DateTime    @default(now()) @map("created_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
   submissions Submission[]
 
   @@unique([environment, slot])

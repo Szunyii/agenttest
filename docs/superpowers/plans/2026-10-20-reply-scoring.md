@@ -33,6 +33,7 @@ Előzmény: `docs/superpowers/plans/2026-10-15-supabase-prisma-store.md` (a jele
 - **Task 6:** 90 mp-es közös időkorlát a két kísérletre; a képek `file` részként mennek (az `image` rész elavult); 400-as képhiba esetén figyelmeztetés a logban (csak a hibaüzenet) és kép nélküli újrapróbálás; a válasz szövege nem zárhatja le a saját címkéjét, és legfeljebb 20 000 karakter; hat próbaeset (+ olvashatatlan kép).
 - **Task 7:** a `sendMails` harmadik paramétere egy `AbortSignal`: a `deliver` 90 mp-es küldési határidőt ad, utána nem indul új levél; `dnsTimeout` 3 mp; a soha le nem futó `info.rejected` ág kikerült; a `saveScore` maga kisbetűsít; a `parseRecipients` küldés előtt elutasítja a hibás formátumú címeket. Tesztszám: 58.
 - **Task 8 (review után):** az IMAP-kliensnek `error`-figyelője van (különben egy kapcsolatbontás leállítaná a folyamatot); egy időtúllépés vagy kapcsolatvesztés miatt félbeszakadt olvasás hibát ad, nem üres listát; a hibaüzenet tartalmazza az IMAP-kódot; a `readReplies` harmadik paramétere a feladat (`ExerciseRef`), és csak az arra hivatkozó, nem automatikus (`Auto-Submitted`) válaszokat tölti le; a `referencesOwnMessage` helyett `answersExercise` és `isAutoReply` van. Tesztszám: 59.
+- **Záró review után:** képkorlát base64-ben 10 MB/kép és 24 MB összesen (a `selectImages` okonként számolja a kimaradtakat: `unsupported`, `tooLarge`, `surplus`; a pontozó ehhez illő tanácsot ad, és a darabszámokat naplózza); az IMAP címzettenként csak a legújabb választ tölti le (`readReplies(credentials, since, target)` a címzettlistával), a pontos `receivedAt` vágás kikerült; `maxRequeues: 0` a mailerben. Tesztszám: 60.
 - **Task 8:** a repository küldője `(mails, signal) => sendMails(credentials, mails, signal)`; a job `warn`-ja csak a hibaüzenetet naplózza (`error instanceof Error ? error.message : error`), mert az AI SDK hibái a kérés törzsét (a válasz szövegét és képeit) is hordozzák; a build-ellenőrzésnél figyelni kell az imapflow által betöltött `pino`-ra.
 
 **Git:** a munka a `feature/reply-scoring` ágon folyik. Taskonként csak a felsorolt fájlokat add hozzá (`git add <fájlok>`), soha ne `git add -A`-t. A `.env.development.local` gitből kizárt; ne írd ki a tartalmát.
@@ -48,7 +49,7 @@ Előzmény: `docs/superpowers/plans/2026-10-15-supabase-prisma-store.md` (a jele
 | Fájl | Művelet | Felelősség |
 |---|---|---|
 | `package.json`, `package-lock.json` | módosít | `imapflow`, `mailparser` |
-| `agent/lib/replies.ts` | új | tiszta: `InboundReply`, saját Message-ID (`buildMessageId`, `parseMessageIds`, `referencesOwnMessage`), `selectReplies`, `selectImages` |
+| `agent/lib/replies.ts` | új | tiszta: `InboundReply`, `ImageSkips`, saját Message-ID (`buildMessageId`, `parseMessageIds`), `answersExercise`, `isAutoReply`, `selectReplies`, `selectImages` |
 | `tests/replies.test.ts` | új | a `replies.ts` tesztjei |
 | `prisma/schema.prisma` | módosít | `Submission` modell, `submissions` reláció |
 | `prisma/migrations/20261020000000_submissions/migration.sql` | új | `submissions` tábla, idegen kulcs, RLS |
@@ -56,9 +57,9 @@ Előzmény: `docs/superpowers/plans/2026-10-15-supabase-prisma-store.md` (a jele
 | `tests/daily-exercise.test.ts` | módosít | a mag tesztjei az új szerződéssel |
 | `agent/lib/grader.ts` | új | `gradeAnswer(exercise, reply)` Claude-dal |
 | `scripts/grading-check.ts` | új | kézi pontozási próba valódi Claude-dal |
-| `agent/lib/mailer.ts` | módosít | `sendMails(credentials, mails)`: több levél egy SMTP-kapcsolaton |
+| `agent/lib/mailer.ts` | módosít | `sendMails(credentials, mails, signal)`: több levél egy SMTP-kapcsolaton, határidővel |
 | `agent/lib/exercise-repository.ts` | módosít | `getPrevious` (`id`, `createdAt`), `getScores`, `saveScore`, többleveles `deliver` |
-| `agent/lib/inbox.ts` | új | `readReplies(credentials, since)` IMAP + mailparser |
+| `agent/lib/inbox.ts` | új | `readReplies(credentials, since, target)` IMAP + mailparser, címzettenként csak a legújabb válasz |
 | `agent/lib/daily-exercise-job.ts` | módosít | az új függőségek bekötése |
 | `docs/superpowers/specs/2026-10-20-reply-scoring-design.md` | módosít | a nyitott pont eredménye (10. task) |
 
@@ -2069,7 +2070,7 @@ A felhasználó az új levélre válaszol egy papírra írt megoldás fotójáva
 - [ ] **Step 8: Harmadik futás**
 
 Run: ugyanaz a `curl`.
-Expected: HTTP 200; az új levélben a fotó alapján adott pontszám és indoklás. Ha az indoklás szerint a képet nem sikerült megnyitni, a kép HEIC volt: ez a spec szerint elfogadott viselkedés, jelezd a felhasználónak.
+Expected: HTTP 200; az új levélben a fotó alapján adott pontszám és indoklás. Ha az indoklás szerint a kép kimaradt, a logban a `[grader] images left out: {...}` sor mutatja az okot (`unsupported` = pl. HEIC, `tooLarge` = base64-ben 10 MB fölött), a `[grader] images rejected` sor pedig azt, hogy az API utasította vissza. A fotó méretét a Gmail „Eredeti megjelenítése” nézete mutatja. Jelezd a felhasználónak, melyik eset volt.
 
 - [ ] **Step 9: A postafiók érintetlen** (a felhasználó)
 

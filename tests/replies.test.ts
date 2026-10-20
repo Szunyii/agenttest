@@ -49,6 +49,15 @@ describe("parseMessageIds", () => {
       [],
     );
   });
+
+  it("reads folded header lines", () => {
+    assert.deepEqual(
+      parseMessageIds([
+        "References: <a@x>\r\n\t<production.3.f0@napi-matek>\r\n",
+      ]),
+      [{ environment: "production", exerciseId: 3 }],
+    );
+  });
 });
 
 describe("referencesOwnMessage", () => {

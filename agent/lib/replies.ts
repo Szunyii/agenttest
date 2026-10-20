@@ -4,7 +4,8 @@ import type { Environment } from "./daily-exercise";
 
 // Every email we send carries one of these ids, so a reply can be traced back
 // to its environment and exercise through In-Reply-To or References.
-const ownMessageId = /^<(production|development)\.(\d+)\.[0-9a-z]+@napi-matek>$/;
+const ownMessageId =
+  /^<(production|development)\.(\d+)\.[0-9a-z]+@napi-matek>$/;
 
 export function buildMessageId(
   environment: Environment,
@@ -14,6 +15,8 @@ export function buildMessageId(
   return `<${environment}.${exerciseId}.${random}@napi-matek>`;
 }
 
+// Our ids in the given header values, in order. A reply usually repeats the
+// same id in In-Reply-To and References, so the result may contain duplicates.
 export function parseMessageIds(
   values: string[],
 ): Array<{ environment: Environment; exerciseId: number }> {
@@ -23,7 +26,12 @@ export function parseMessageIds(
       const match = ownMessageId.exec(id);
 
       return match
-        ? [{ environment: match[1] as Environment, exerciseId: Number(match[2]) }]
+        ? [
+            {
+              environment: match[1] as Environment,
+              exerciseId: Number(match[2]),
+            },
+          ]
         : [];
     });
 }

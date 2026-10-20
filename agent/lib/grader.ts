@@ -102,9 +102,10 @@ async function requestGrade(
         ]
       : []),
   ];
-  // The reply must not close its own tag.
+  // The reply must not close its own tag. Renaming the tag name (rather than
+  // deleting the tag) cannot leave pieces that join into a new one.
   const replyText = text
-    .replaceAll("</student_reply>", "")
+    .replace(/student_reply/gi, "student-reply")
     .trim()
     .slice(0, maxReplyChars);
 

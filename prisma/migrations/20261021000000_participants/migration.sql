@@ -33,7 +33,8 @@ ALTER TABLE "participants" ENABLE ROW LEVEL SECURITY;
 
 -- Switching a participant back on restarts active_since: an exercise sent
 -- while they were off was not theirs, so their next email must not say they
--- sent no solution. Prisma cannot express triggers and leaves them alone.
+-- sent no solution. Prisma cannot express triggers and leaves them alone; a
+-- later migration that drops or renames active_since must update this one.
 CREATE FUNCTION "participants_restart_active_since"() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = ''

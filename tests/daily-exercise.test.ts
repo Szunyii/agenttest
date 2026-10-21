@@ -184,7 +184,7 @@ describe("normalizeRecipients", () => {
       "anna,kovacs@gmail.com",
       "anna;kovacs@gmail.com",
       "a<b@x.hu>",
-      "c@x.hu​",
+      "c@x.hu\u200b",
       "ánna@example.com",
     ]) {
       assert.throws(

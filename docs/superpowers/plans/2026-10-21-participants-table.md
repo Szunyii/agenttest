@@ -20,7 +20,9 @@ Előzmény: `docs/superpowers/plans/2026-10-20-reply-scoring.md` (a jelenlegi k�
 
 **Végrehajtás közbeni módosítások** (ahol eltér, a repó kódja a mérvadó):
 
-- **Task 1:** a formátum-CHECK a `[^[:space:]@]` helyett a JavaScript `\s` készletét írja ki (`[^@\t\n\v\f\r    -     　﻿]`); a komment a valódi okokat adja meg; a nézet fölött figyelmeztetés, hogy egy rögzített oszlop típusváltása előtt a nézetet el kell dobni. PGlite-on igazolva: 92 mintán nincs eltérés a JS-szabálytól.
+- **Task 1:** a formátum-CHECK a `[^[:space:]@]` helyett a JavaScript `\s` készletét írja ki (`[^@\t\n\v\f\r    -     　﻿]`); a komment a valódi okokat adja meg; a nézet fölött figyelmeztetés, hogy egy rögzített oszlop típusváltása előtt a nézetet el kell dobni. PGlite-on igazolva: 92 mintán nincs eltérés a JS-szabálytól. Utólag: `active_since` oszlop és egy trigger, amely visszakapcsoláskor most-ra állítja (a `Recipient.since` ebből jön, nem a `created_at`-ből).
+- **Task 2:** a `normalizeRecipients` a névben lévő szóközöket egyre vonja össze; új tesztek (tárolt pontszám az új résztvevőnél, új résztvevő IMAP-hibánál, `already-sent` az üres lista előtt, nincs üres bekezdés). Tesztszám: 73.
+- **Task 3:** a repository `since: row.activeSince`; élesben a `no-recipients` `console.warn`; a `db.ts` kommentje frissül.
 
 **Git:** a munka a `feature/participants-table` ágon folyik. Taskonként csak a felsorolt fájlokat add hozzá, soha ne `git add -A`-t. A `.env.development.local` tartalmát ne írd ki.
 

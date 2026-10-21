@@ -39,6 +39,7 @@ A napi levél címzettjei az `EXERCISE_RECIPIENTS` env változó helyett egy `pa
 | `email` | szöveg | kisbetűs cím |
 | `name` | szöveg, üres is lehet | megszólításhoz |
 | `active` | logikai, alapértelmezés: igaz | kapjon-e levelet |
+| `activeSince` | időbélyeg, alapértelmezés: most | mióta aktív; egy trigger visszakapcsoláskor az aktuális időre állítja |
 | `createdAt` | időbélyeg, alapértelmezés: most | mikor került a listára |
 
 Egyedi: `(environment, email)`. A migráció kézzel írt CHECK-megszorításokkal (a Prisma-sémában nem fejezhetők ki, de a Prisma nem is törli őket) biztosítja, hogy:
@@ -77,9 +78,10 @@ A `security_invoker` miatt a nézetet olvasó szerepkörre a táblák RLS-e vona
 |---|---|
 | `prisma/schema.prisma` | módosul: `Participant` modell |
 | `prisma/migrations/` | *új* migráció: `participants` tábla, egyedi index, CHECK-megszorítások, RLS, `participant_scores` nézet |
-| `agent/lib/daily-exercise.ts` | módosul: `Recipient { email, name, since }` a sima címek helyett (`since` = a résztvevő `createdAt`-je); a `parseRecipients(env)` helyett `normalizeRecipients(rows)` (kisbetű, szóköz, ismétlődés, formátum); új eredmény: `no-recipients`; új score-sor: `new` (nem jelenik meg); a `composeEmail` névvel köszön |
+| `agent/lib/daily-exercise.ts` | módosul: `Recipient { email, name, since }` a sima címek helyett (`since` = a résztvevő `activeSince`-e); a `parseRecipients(env)` helyett `normalizeRecipients(rows)` (kisbetű, szóköz, ismétlődés, formátum; a névben lévő szóközöket egyre vonja össze); új eredmény: `no-recipients`; új score-sor: `new` (nem jelenik meg); a `composeEmail` névvel köszön |
 | `agent/lib/exercise-repository.ts` | módosul: új `getRecipients()` → az adott környezet aktív résztvevői, `id` szerint |
-| `agent/lib/daily-exercise-job.ts` | módosul: az `EXERCISE_RECIPIENTS` helyett `normalizeRecipients(await repository.getRecipients())`; a válaszok kiválasztásához a címek listája |
+| `agent/lib/daily-exercise-job.ts` | módosul: az `EXERCISE_RECIPIENTS` helyett `normalizeRecipients(await repository.getRecipients())`; a válaszok kiválasztásához a címek listája; élesben a `no-recipients` figyelmeztetést ír a logba |
+| `agent/lib/db.ts` | módosul: a komment (minden futás kapcsolódik, a címzettek miatt) |
 | `tests/daily-exercise.test.ts` | módosul: címzett-objektumok, új tesztek |
 
 A `replies.ts`, az `inbox.ts`, a `grader.ts` és a `mailer.ts` nem változik: a válaszok kiválasztása továbbra is címlistával dolgozik (`recipients.map((r) => r.email)`).
@@ -92,7 +94,9 @@ A `replies.ts`, az `inbox.ts`, a `grader.ts` és a `mailer.ts` nem változik: a 
 4. Ha nincs aktív résztvevő: `no-recipients` (nincs generálás, beszúrás és levél).
 5. Pontozás és generálás, majd küldés, mint most. Címzettenként a score-sor:
    - `graded`, `none`, `unknown`, mint most;
-   - `new`, ha a résztvevő `since` időpontja az előző feladat `createdAt`-je utáni, és nincs tőle tárolt pontszám vagy válasz.
+   - `new`, ha a résztvevő `since` időpontja (`active_since`: a felvétel vagy az utolsó visszakapcsolás ideje) az előző feladat `createdAt`-je utáni, és nincs tőle tárolt pontszám vagy válasz.
+
+Ismert, ritka eset: aki a futás első másodperceiben (a címzettek betöltése és a mai feladat beszúrása között) kerül a listára vagy kapcsol vissza, aznap nem kap levelet, másnap pedig „nem küldtél megoldást” sort kaphat.
 
 A résztvevők betöltése a 9 órás ellenőrzés előtt történik (naponta két cron-hívás, egy olcsó lekérdezés), így a mag tiszta marad: a címzetteket továbbra is a `deps.recipients` adja.
 
@@ -107,7 +111,8 @@ A résztvevők betöltése a 9 órás ellenőrzés előtt történik (naponta k�
 | Eset | Következmény |
 |---|---|
 | A résztvevők lekérdezése elbukik | A job hibával leáll (mint bármely más adatbázis-hiba a futás elején) |
-| Nincs aktív résztvevő | `no-recipients`, nincs levél és nincs új feladat |
+| Nincs aktív résztvevő | `no-recipients`, nincs levél és nincs új feladat; élesben figyelmeztetés a logban (pl. ha a résztvevőket rossz környezettel vették fel) |
+| Résztvevő visszakapcsolása | A trigger az `active_since`-t most-ra állítja, így a következő levelében nincs „nem küldtél megoldást” sor a kikapcsolt időszak feladatára |
 | Elgépelt vagy nagybetűs cím a Supabase-ben | Mentéskor hibát ad a CHECK-megszorítás; a job nem is látja |
 | Ismétlődő cím (pl. eltérő kis-nagybetű a megszorítás előtt) | A `normalizeRecipients` kiszűri |
 | Kikapcsolt résztvevő válaszol egy régi levélre | Nem pontozódik (nincs a címzettek között); a korábbi pontjai a nézetben maradnak |

@@ -1,5 +1,7 @@
 # Napi feladat: Supabase + Prisma, „minden vagy semmi” – terv
 
+> **Megjegyzés (2026-10-21):** a címzettek azóta a Supabase `participants` táblájából jönnek; az `EXERCISE_RECIPIENTS` env változó megszűnt; az itt leírt env-alapú címzettlista elavult. Lásd `docs/superpowers/specs/2026-10-21-participants-table-design.md`.
+
 Dátum: 2026-10-15
 Előzmény: `docs/superpowers/specs/2026-10-14-daily-math-email-design.md` (a napi levél jelenlegi működése)
 

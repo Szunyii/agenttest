@@ -2010,7 +2010,7 @@ git commit -m "feat: read replies over IMAP and wire scoring into the daily job"
 
 ### Task 9: Helyi végpontig tartó próba (a felhasználóval)
 
-A levelek a felhasználó saját címére mennek (`EXERCISE_RECIPIENTS` egy cím). A titkokat ne írd ki.
+A levelek a felhasználó saját címére mennek (a `participants` táblában szereplő cím). A titkokat ne írd ki.
 
 - [ ] **Step 1: Migráció** (a felhasználó)
 
@@ -2044,7 +2044,7 @@ A felhasználó az iCloudról válaszol a levélre, a levél szövegébe írt me
 Run: ugyanaz a `curl`, mint a 3. lépésben.
 Expected: HTTP 200, `development: sent`. Az új levélben: „Pontszámod: N/10” és egy-két mondatos magyar, tegező indoklás.
 
-Ha a levélben „A pontszámot most nem sikerült megállapítani.” áll: a logban keresd a `reading replies failed` vagy `grading … failed` sort (`grep -A5 "failed" "${TMPDIR:-/tmp}/eve-dev.log"`). IMAP-hibánál a felhasználó ellenőrizze a Gmailben: Beállítások → Továbbítás és POP/IMAP → az IMAP legyen engedélyezve (ha a felület mutatja ezt a kapcsolót). Ha „Erre a feladatra nem küldtél megoldást.” áll, a válasz nem hivatkozott a levél Message-ID-jére, vagy más címről jött, mint az `EXERCISE_RECIPIENTS`: jelentsd (BLOCKED).
+Ha a levélben „A pontszámot most nem sikerült megállapítani.” áll: a logban keresd a `reading replies failed` vagy `grading … failed` sort (`grep -A5 "failed" "${TMPDIR:-/tmp}/eve-dev.log"`). IMAP-hibánál a felhasználó ellenőrizze a Gmailben: Beállítások → Továbbítás és POP/IMAP → az IMAP legyen engedélyezve (ha a felület mutatja ezt a kapcsolót). Ha „Erre a feladatra nem küldtél megoldást.” áll, a válasz nem hivatkozott a levél Message-ID-jére, vagy más címről jött, mint ami a `participants` táblában szerepel: jelentsd (BLOCKED).
 
 Ellenőrzés (csak olvas):
 

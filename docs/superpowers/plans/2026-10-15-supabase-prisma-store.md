@@ -854,9 +854,10 @@ DIRECT_URL=<Session pooler, 5432-es port, jelszóval>
 ANTHROPIC_API_KEY=<Anthropic API-kulcs>
 GMAIL_USER=<küldő Gmail-cím>
 GMAIL_APP_PASSWORD=<App Password>
-EXERCISE_RECIPIENTS=<a felhasználó SAJÁT címe>
 DAILY_EXERCISE_DEV=1
 ```
+
+(A címzettek 2026-10-21 óta a `participants` táblából jönnek; helyi próbához a saját címedet vedd fel ott `development` környezettel.)
 
 - [ ] **Step 2: Migráció**
 
@@ -913,12 +914,11 @@ Minden lépés előtt kérdezd meg a felhasználót.
 vercel env add ANTHROPIC_API_KEY production
 vercel env add GMAIL_USER production
 vercel env add GMAIL_APP_PASSWORD production
-vercel env add EXERCISE_RECIPIENTS production
 vercel env add DATABASE_URL production
 vercel env add CRON_SECRET production
 ```
 
-Az `EXERCISE_RECIPIENTS` a három cím vesszővel. A `CRON_SECRET` egy hosszú véletlen érték (pl. `openssl rand -hex 32`): ha be van állítva, a cron-végpont csak a Vercel saját hívását fogadja el. A `DIRECT_URL` és a `DAILY_EXERCISE_DEV` NEM kell élesben.
+A címzetteket élesben a Supabase `participants` táblájában kell felvenni `production` környezettel (lásd `docs/superpowers/specs/2026-10-21-participants-table-design.md`); az `EXERCISE_RECIPIENTS` env változó megszűnt. A `CRON_SECRET` egy hosszú véletlen érték (pl. `openssl rand -hex 32`): ha be van állítva, a cron-végpont csak a Vercel saját hívását fogadja el. A `DIRECT_URL` és a `DAILY_EXERCISE_DEV` NEM kell élesben.
 
 - [ ] **Step 4: Deploy:** `npx eve deploy --non-interactive --yes` → kilépési kód 0. Figyelem: az `eve deploy` a munkakönyvtárat tölti fel, a felhasználó commitolatlan fájljaival együtt (pl. `agent/instructions.md`, `agent/skills/`, a `get_weather` és `greeting` tool). Ha ezeket nem akarod élesbe vinni, előtte `git stash -u`, a deploy után `git stash pop`. A Vercelen futó build előkészíti a sandboxot („initializing 1 sandbox template”); ha ez elbukik, a deploy is leáll, és a hibaüzenet a sandboxról szól, nem az adatbázisról.
 - [ ] **Step 5: Ellenőrzés:** Vercel → Settings → Cron Jobs: `0 7 * * *` és `0 8 * * *`; Settings → Functions: Fluid Compute bekapcsolva, Settings → Environment Variables: az „Automatically expose System Environment Variables” be van kapcsolva (alapértelmezés; nélküle a job `VERCEL_ENV is missing` hibával leáll); a Max Duration legalább 300 mp (a job legrosszabb esetben a Claude-generálás plusz 90 mp tranzakció), és a Function Region a Supabase-projekt régiójához közel van (pl. EU-s Supabase esetén `fra1`). Az alapértelmezett `iad1` (USA) minden adatbázis-kéréshez nagyjából 90 ms-ot ad.

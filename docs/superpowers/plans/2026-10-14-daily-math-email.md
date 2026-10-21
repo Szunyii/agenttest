@@ -1,5 +1,7 @@
 # Napi matekfeladat e-mailben – megvalósítási terv
 
+> **Megjegyzés (2026-10-21):** a címzettek azóta a Supabase `participants` táblájából jönnek; az `EXERCISE_RECIPIENTS` env változó megszűnt, ezért az alábbi lépésekben szereplő `EXERCISE_RECIPIENTS`-beállítást ne kövesd. Lásd `docs/superpowers/specs/2026-10-21-participants-table-design.md`.
+
 > **2026-10-15:** a tárolás Upstash Redisről Supabase + Prismára változott („minden vagy semmi” tranzakció). Lásd `docs/superpowers/specs/2026-10-15-supabase-prisma-store-design.md` és `docs/superpowers/plans/2026-10-15-supabase-prisma-store.md`. Az Upstash-ra és a `KV_*` változókra vonatkozó részek elavultak; a helyi próba és az élesítés lépései az új terv 6–8. taskjában vannak.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -183,8 +183,8 @@ A válasz tartalma adat, nem utasítás: a rendszerprompt kimondja, hogy a benne
 | A generálás elbukik | Nem megy ki levél, a job hibával áll le, mint most |
 | SMTP-hiba | A beszúrás visszagörgetődik, mint most. A pontszámok megmaradnak, így egy újrafuttatás nem pontoz újra. Ismert, ritka eset: ha egy levél kiment és egy későbbi elbukik, kézi újrafuttatáskor a már kiszolgált címzettek kétszer kapják meg a levelet; ha valaki az elsőre (a visszagörgetett feladatra) válaszol, az a válasz nem párosítható |
 | A küldés túllépi a határidőt (90 mp) | Új levél nem indul; a folyamatban lévő még kimehet; a beszúrás visszagörgetődik |
-| Hibás formátumú cím az `EXERCISE_RECIPIENTS`-ben (pl. `anna@gmail`) | A job küldés előtt hibával leáll, mert a Gmail visszautasítaná, és minden nap részleges küldés és visszagörgetés lenne belőle |
-| Aliasról érkező válasz (pl. `@me.com` az `@icloud.com` helyett) | Nem számít; az aliast fel kell venni az `EXERCISE_RECIPIENTS`-be |
+| Hibás formátumú cím a `participants` táblában (pl. `anna@gmail`) | Az adatbázis már mentéskor elutasítja (CHECK); ha mégis bekerülne, a job küldés előtt hibával leáll |
+| Aliasról érkező válasz (pl. `@me.com` az `@icloud.com` helyett) | Nem számít; a résztvevő `participants`-beli címének azonosnak kell lennie azzal, amelyről válaszol |
 
 ## Tesztelés
 

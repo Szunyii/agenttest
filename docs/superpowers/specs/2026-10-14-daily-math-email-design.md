@@ -1,5 +1,7 @@
 # Napi matekfeladat e-mailben – terv
 
+> **Megjegyzés (2026-10-21):** a címzettek azóta a Supabase `participants` táblájából jönnek; az `EXERCISE_RECIPIENTS` env változó megszűnt; az itt leírt env-alapú címzettlista elavult. Lásd `docs/superpowers/specs/2026-10-21-participants-table-design.md`.
+
 > **2026-10-15:** a tárolás Upstash Redisről Supabase + Prismára változott („minden vagy semmi” tranzakció). Lásd `docs/superpowers/specs/2026-10-15-supabase-prisma-store-design.md` és `docs/superpowers/plans/2026-10-15-supabase-prisma-store.md`. Az Upstash-ra és a `KV_*` változókra vonatkozó részek elavultak.
 
 Dátum: 2026-10-14

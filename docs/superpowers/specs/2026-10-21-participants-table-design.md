@@ -116,7 +116,7 @@ A résztvevők betöltése a 9 órás ellenőrzés előtt történik (naponta k�
 | Elgépelt vagy nagybetűs cím a Supabase-ben | Mentéskor hibát ad a CHECK-megszorítás; a job nem is látja |
 | Ismétlődő cím (pl. eltérő kis-nagybetű a megszorítás előtt) | A `normalizeRecipients` kiszűri |
 | Kikapcsolt résztvevő válaszol egy régi levélre | Nem pontozódik (nincs a címzettek között); a korábbi pontjai a nézetben maradnak |
-| Résztvevő e-mail-címe megváltozik | A régi pontok a régi címhez tartoznak; a `submissions` sorait kézzel lehet átírni |
+| Résztvevő e-mail-címe megváltozik | A régi pontok a régi címhez tartoznak (a `submissions` sorait kézzel lehet átírni). Ha a címet a meglévő soron írod át, az új cím első levelében „Erre a feladatra nem küldtél megoldást” sor lehet; címváltáskor ezért érdemesebb új sort felvenni, a régit kikapcsolni. |
 
 ## Tesztelés
 

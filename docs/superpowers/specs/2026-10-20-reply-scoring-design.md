@@ -1,5 +1,7 @@
 # Napi feladat: válaszlevelek pontozása – terv
 
+> **Megjegyzés (2026-10-21):** a címzettek azóta a Supabase `participants` táblájából jönnek; az `EXERCISE_RECIPIENTS` env változó és a `parseRecipients` megszűnt (helyette `normalizeRecipients`). Lásd `docs/superpowers/specs/2026-10-21-participants-table-design.md`.
+
 Dátum: 2026-10-20
 Előzmény: `docs/superpowers/specs/2026-10-15-supabase-prisma-store-design.md` (a napi levél és a `daily_exercises` tábla jelenlegi működése)
 

@@ -39,13 +39,14 @@ A napi levél címzettjei az `EXERCISE_RECIPIENTS` env változó helyett egy `pa
 | `email` | szöveg | kisbetűs cím |
 | `name` | szöveg, üres is lehet | megszólításhoz |
 | `active` | logikai, alapértelmezés: igaz | kapjon-e levelet |
-| `activeSince` | időbélyeg, alapértelmezés: most | mióta aktív; egy trigger visszakapcsoláskor az aktuális időre állítja |
+| `activeSince` | időbélyeg, alapértelmezés: most | mióta aktív; egy trigger visszakapcsoláskor, illetve egy aktív sor környezetének vagy címének átírásakor az aktuális időre állítja |
 | `createdAt` | időbélyeg, alapértelmezés: most | mikor került a listára |
 
 Egyedi: `(environment, email)`. A migráció kézzel írt CHECK-megszorításokkal (a Prisma-sémában nem fejezhetők ki, de a Prisma nem is törli őket) biztosítja, hogy:
 
 - az `email` kisbetűs és nincs körülötte szóköz: `email = lower(btrim(email))`;
-- az `email` formátuma érvényes, ugyanazzal a szabállyal, mint a kód (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`). Az SQL a JavaScript `\s` szóköz-készletét kifejezetten kiírja (`[^@\t\n\v\f\r    -     　﻿]`), mert a POSIX `[:space:]` kihagy néhány Unicode-szóközt (pl. a bemásolt nem törő szóközt), és a szerver nyelvi beállításától függ.
+- az `email` formátuma érvényes, ugyanazzal a szabállyal, mint a kód (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`); az SQL a JavaScript `\s` szóköz-készletét `\uXXXX` escape-ekkel kifejezetten kiírja (lásd a migrációt), mert a POSIX `[:space:]` kihagy néhány Unicode-szóközt (pl. a bemásolt nem törő szóközt), és a szerver nyelvi beállításától függ;
+- az `email` csak látható ASCII-karakterekből áll, a `, ; : < > ( ) [ ] " \` karakterek nélkül (a kód ugyanezt ellenőrzi): a levélküldő az `anna,kovacs@gmail.com`-ot `kovacs@gmail.com`-ként értené, egy láthatatlan karakter pedig átcsúszna az egyediségen. Ékezetes (nemzetközi) cím így nem vehető fel.
 
 Az RLS be van kapcsolva, szabályok nélkül, mint a többi táblán. A migráció nem tartalmaz címeket: a sorokat a felhasználó veszi fel.
 
@@ -83,6 +84,7 @@ A `security_invoker` miatt a nézetet olvasó szerepkörre a táblák RLS-e vona
 | `agent/lib/daily-exercise-job.ts` | módosul: az `EXERCISE_RECIPIENTS` helyett `normalizeRecipients(await repository.getRecipients())`; a válaszok kiválasztásához a címek listája; élesben a `no-recipients` figyelmeztetést ír a logba |
 | `agent/lib/db.ts` | módosul: a komment (minden futás kapcsolódik, a címzettek miatt) |
 | `tests/daily-exercise.test.ts` | módosul: címzett-objektumok, új tesztek |
+| `tests/exercise-repository.test.ts` | *új*: a `getRecipients` környezet- és aktív-szűrője |
 
 A `replies.ts`, az `inbox.ts`, a `grader.ts` és a `mailer.ts` nem változik: a válaszok kiválasztása továbbra is címlistával dolgozik (`recipients.map((r) => r.email)`).
 
@@ -116,7 +118,7 @@ A résztvevők betöltése a 9 órás ellenőrzés előtt történik (naponta k�
 | Elgépelt vagy nagybetűs cím a Supabase-ben | Mentéskor hibát ad a CHECK-megszorítás; a job nem is látja |
 | Ismétlődő cím (pl. eltérő kis-nagybetű a megszorítás előtt) | A `normalizeRecipients` kiszűri |
 | Kikapcsolt résztvevő válaszol egy régi levélre | Nem pontozódik (nincs a címzettek között); a korábbi pontjai a nézetben maradnak |
-| Résztvevő e-mail-címe megváltozik | A régi pontok a régi címhez tartoznak (a `submissions` sorait kézzel lehet átírni). Ha a címet a meglévő soron írod át, az új cím első levelében „Erre a feladatra nem küldtél megoldást” sor lehet; címváltáskor ezért érdemesebb új sort felvenni, a régit kikapcsolni. |
+| Résztvevő e-mail-címe megváltozik | A régi pontok a régi címhez tartoznak (a `submissions` sorait kézzel lehet átírni). A trigger a cím (vagy a környezet) átírásakor az `active_since`-t most-ra állítja, így az új cím első levelében nincs hamis „nem küldtél megoldást” sor. |
 
 ## Tesztelés
 

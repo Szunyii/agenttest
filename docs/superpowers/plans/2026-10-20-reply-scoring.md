@@ -1,5 +1,7 @@
 # Napi feladat: válaszlevelek pontozása – megvalósítási terv
 
+> **Megjegyzés (2026-10-21):** a címzettek azóta a Supabase `participants` táblájából jönnek; az `EXERCISE_RECIPIENTS` env változó és a `parseRecipients` megszűnt (helyette `normalizeRecipients`). Lásd `docs/superpowers/specs/2026-10-21-participants-table-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A reggel 9 órás job a küldés előtt beolvassa és Claude-dal 0–10 pontra értékeli az előző feladatra érkezett válaszleveleket, és mindenki személyre szabott levelet kap a saját pontszámával.

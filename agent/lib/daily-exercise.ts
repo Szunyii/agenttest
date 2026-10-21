@@ -4,7 +4,8 @@ export interface Recipient {
   // Lowercased once normalizeRecipients has run.
   email: string;
   name: string | null;
-  // When the participant joined; an exercise sent earlier was not theirs.
+  // When the participant was last switched on (added or re-activated); an
+  // exercise sent earlier was not theirs.
   since: Date;
 }
 

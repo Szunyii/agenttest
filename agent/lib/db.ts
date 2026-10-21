@@ -4,8 +4,8 @@ import { PrismaClient } from "../../generated/prisma/client";
 
 // One client per job run: with a shared client, one run's cleanup
 // (`$disconnect()` cancels open transactions) could roll back another run's
-// insert when Fluid Compute runs them concurrently on the same instance. The
-// client connects lazily, so a run that skips never opens a connection.
+// insert when Fluid Compute runs them concurrently on the same instance. Every
+// run connects once, to load the day's recipients.
 export function createPrisma(): PrismaClient {
   const connectionString = process.env.DATABASE_URL?.trim();
 

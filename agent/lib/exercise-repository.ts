@@ -7,6 +7,7 @@ import type {
   Grade,
   NewExerciseRecord,
   OutgoingMail,
+  Recipient,
   StoredScore,
 } from "./daily-exercise";
 import type { InboundReply } from "./replies";
@@ -48,6 +49,20 @@ export function createExerciseRepository(
   send: (mails: OutgoingMail[], signal: AbortSignal) => Promise<void>,
 ) {
   return {
+    // Who gets today's email: the environment's active participants.
+    async getRecipients(): Promise<Recipient[]> {
+      const rows = await prisma.participant.findMany({
+        where: { environment, active: true },
+        orderBy: { id: "asc" },
+      });
+
+      return rows.map((row) => ({
+        email: row.email,
+        name: row.name,
+        since: row.activeSince,
+      }));
+    },
+
     async getPrevious(): Promise<ExerciseRecord | null> {
       const row = await prisma.dailyExercise.findFirst({
         where: { environment },

@@ -1,5 +1,5 @@
 import {
-  parseRecipients,
+  normalizeRecipients,
   resolveRunMode,
   runDailyExercise,
   type DailyExerciseResult,
@@ -32,13 +32,15 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       // Google shows App Passwords in groups of four separated by spaces.
       appPassword: requireEnv("GMAIL_APP_PASSWORD").replace(/\s+/g, ""),
     };
-    const recipients = parseRecipients(requireEnv("EXERCISE_RECIPIENTS"));
     prisma = createPrisma();
     const repository = createExerciseRepository(
       prisma,
       environment,
       (mails, signal) => sendMails(credentials, mails, signal),
     );
+    // Loaded before the 9 o'clock check: a cheap query, and the core stays pure.
+    const recipients = normalizeRecipients(await repository.getRecipients());
+    const emails = recipients.map((recipient) => recipient.email);
 
     const result = await runDailyExercise({
       now: new Date(),
@@ -46,7 +48,11 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
       recipients,
       getPrevious: repository.getPrevious,
       fetchReplies: async (previous) => {
-        const target = { environment, exerciseId: previous.id, recipients };
+        const target = {
+          environment,
+          exerciseId: previous.id,
+          recipients: emails,
+        };
 
         return selectReplies(
           await readReplies(credentials, previous.createdAt, target),
@@ -66,7 +72,13 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
         console.warn(message, error instanceof Error ? error.message : error),
     });
 
-    console.log(`[daily-exercise] ${environment}: ${result}`);
+    // An empty production list pauses the emails silently otherwise, e.g.
+    // when the participants were added with the wrong environment.
+    if (result === "no-recipients" && environment === "production") {
+      console.warn("[daily-exercise] production: no active participants");
+    } else {
+      console.log(`[daily-exercise] ${environment}: ${result}`);
+    }
 
     return result;
   } catch (error) {

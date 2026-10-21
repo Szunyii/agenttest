@@ -54,6 +54,8 @@ model Participant {
   email       String
   name        String?
   active      Boolean     @default(true)
+  // Reset to now() by a trigger whenever `active` is switched back on.
+  activeSince DateTime    @default(now()) @map("active_since")
   createdAt   DateTime    @default(now()) @map("created_at")
 
   @@unique([environment, email])

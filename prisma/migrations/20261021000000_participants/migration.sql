@@ -5,6 +5,7 @@ CREATE TABLE "participants" (
     "email" TEXT NOT NULL,
     "name" TEXT,
     "active" BOOLEAN NOT NULL DEFAULT true,
+    "active_since" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "participants_pkey" PRIMARY KEY ("id")
@@ -29,6 +30,26 @@ ALTER TABLE "participants"
 -- Same as the other tables: with RLS on and no policies, only the database
 -- owner (Prisma) can read or write the table through Supabase's REST API.
 ALTER TABLE "participants" ENABLE ROW LEVEL SECURITY;
+
+-- Switching a participant back on restarts active_since: an exercise sent
+-- while they were off was not theirs, so their next email must not say they
+-- sent no solution. Prisma cannot express triggers and leaves them alone.
+CREATE FUNCTION "participants_restart_active_since"() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW."active" AND NOT OLD."active" THEN
+    NEW."active_since" := CURRENT_TIMESTAMP;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "participants_restart_active_since"
+BEFORE UPDATE OF "active" ON "participants"
+FOR EACH ROW EXECUTE FUNCTION "participants_restart_active_since"();
 
 -- Points per participant, computed from the graded replies. security_invoker
 -- applies the tables' RLS to whoever reads the view, so Supabase's REST API

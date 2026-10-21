@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   budapestClock,
   composeEmail,
-  parseRecipients,
+  normalizeRecipients,
   resolveRunMode,
   runDailyExercise,
   type DailyExerciseDeps,
@@ -12,6 +12,7 @@ import {
   type Grade,
   type NewExerciseRecord,
   type OutgoingMail,
+  type Recipient,
   type ScoreLine,
   type StoredScore,
 } from "../agent/lib/daily-exercise.ts";
@@ -31,6 +32,16 @@ const previous: ExerciseRecord = {
   solution: "Előző megoldás",
 };
 const graded: ScoreLine = { kind: "graded", score: 8, feedback: "Szép munka." };
+// Everyone in the fixtures joined well before the previous exercise.
+const joined = new Date("2026-10-01T00:00:00Z");
+
+function recipient(
+  email: string,
+  name: string | null = null,
+  since = joined,
+): Recipient {
+  return { email, name, since };
+}
 
 function reply(from: string): InboundReply {
   return {
@@ -54,7 +65,7 @@ function fakeDeps(overrides: Partial<DailyExerciseDeps> = {}) {
   const deps: DailyExerciseDeps = {
     now: new Date("2026-10-15T07:05:00Z"), // 09:05 in Budapest (CEST)
     devMode: false,
-    recipients: ["a@example.com", "b@example.com"],
+    recipients: [recipient("a@example.com"), recipient("b@example.com")],
     getPrevious: async () => {
       calls.push("getPrevious");
       return previous;
@@ -123,31 +134,45 @@ describe("budapestClock", () => {
   });
 });
 
-describe("parseRecipients", () => {
-  it("splits, trims and drops empty entries", () => {
+describe("normalizeRecipients", () => {
+  it("lowercases and trims addresses and names", () => {
     assert.deepEqual(
-      parseRecipients(" a@example.com, b@example.com ,,c@example.com "),
-      ["a@example.com", "b@example.com", "c@example.com"],
+      normalizeRecipients([recipient(" Anna@Example.COM ", " Anna ")]),
+      [recipient("anna@example.com", "Anna")],
     );
   });
 
-  it("throws when no address is given", () => {
-    assert.throws(() => parseRecipients(" , "), /EXERCISE_RECIPIENTS/);
-  });
-
-  it("drops repeated addresses, ignoring letter case", () => {
+  it("keeps the first of repeated addresses, ignoring letter case", () => {
     assert.deepEqual(
-      parseRecipients("a@example.com, A@Example.com, b@example.com"),
-      ["a@example.com", "b@example.com"],
+      normalizeRecipients([
+        recipient("a@example.com", "Első"),
+        recipient("A@Example.com", "Második"),
+        recipient("b@example.com"),
+      ]),
+      [recipient("a@example.com", "Első"), recipient("b@example.com")],
     );
   });
 
-  it("rejects malformed addresses before anything is sent", () => {
+  it("turns a blank name into null", () => {
+    assert.equal(
+      normalizeRecipients([recipient("a@example.com", "  ")])[0].name,
+      null,
+    );
+  });
+
+  it("rejects a malformed address before anything is sent", () => {
     assert.throws(
-      () => parseRecipients("a@example.com, anna@gmail"),
-      /malformed addresses: anna@gmail/,
+      () =>
+        normalizeRecipients([
+          recipient("a@example.com"),
+          recipient("anna@gmail"),
+        ]),
+      /Malformed participant address: anna@gmail/,
     );
-    assert.throws(() => parseRecipients("x@gmail,com"), /malformed/);
+  });
+
+  it("accepts an empty list", () => {
+    assert.deepEqual(normalizeRecipients([]), []);
   });
 });
 
@@ -242,6 +267,33 @@ describe("composeEmail", () => {
     const mail = composeEmail(previous, graded, today, "2026-10-15");
 
     assert.ok(mail.text.includes("Válaszolj erre a levélre a megoldásoddal"));
+  });
+
+  it("greets the recipient by name", () => {
+    const mail = composeEmail(previous, graded, today, "2026-10-15", "Anna");
+
+    assert.ok(mail.text.startsWith("Szia Anna!\n\n"));
+  });
+
+  it("greets without a name when there is none", () => {
+    const mail = composeEmail(previous, graded, today, "2026-10-15", null);
+
+    assert.ok(mail.text.startsWith("Szia!\n\n"));
+  });
+
+  it("leaves out the score line for a new participant", () => {
+    const mail = composeEmail(
+      previous,
+      { kind: "new" },
+      today,
+      "2026-10-15",
+      null,
+    );
+
+    assert.ok(mail.text.includes("Megoldás: Előző megoldás"));
+    assert.ok(!mail.text.includes("Pontszámod"));
+    assert.ok(!mail.text.includes("nem küldtél"));
+    assert.ok(!mail.text.includes("nem sikerült"));
   });
 });
 
@@ -493,7 +545,7 @@ describe("runDailyExercise", () => {
 
   it("matches recipients to replies case-insensitively", async () => {
     const { deps, delivered, saved } = fakeDeps({
-      recipients: ["A@Example.com"],
+      recipients: [recipient("A@Example.com")],
     });
 
     await runDailyExercise(deps);
@@ -512,6 +564,67 @@ describe("runDailyExercise", () => {
     assert.ok(!calls.includes("fetchReplies"));
     assert.ok(!delivered[0].mails[0].text.includes("Az előző feladat"));
     assert.ok(delivered[0].mails[0].text.includes("Mai feladat szövege"));
+  });
+
+  it("pauses without generating or sending when nobody is active", async () => {
+    const { deps, calls, delivered } = fakeDeps({ recipients: [] });
+
+    assert.equal(await runDailyExercise(deps), "no-recipients");
+    assert.ok(!calls.includes("fetchReplies"));
+    assert.ok(!calls.includes("generate"));
+    assert.deepEqual(delivered, []);
+  });
+
+  it("checks the hour before the empty list", async () => {
+    const { deps } = fakeDeps({
+      recipients: [],
+      now: new Date("2026-12-01T07:30:00Z"), // 08:30 in Budapest (CET)
+    });
+
+    assert.equal(await runDailyExercise(deps), "skipped-hour");
+  });
+
+  it("skips the score line for someone who joined after the previous exercise", async () => {
+    const { deps, delivered } = fakeDeps({
+      recipients: [
+        recipient("a@example.com"),
+        recipient("c@example.com", null, new Date("2026-10-14T12:00:00Z")),
+      ],
+    });
+
+    await runDailyExercise(deps);
+
+    const newcomer = delivered[0].mails[1];
+
+    assert.equal(newcomer.to, "c@example.com");
+    assert.ok(newcomer.text.includes("Megoldás: Előző megoldás"));
+    assert.ok(!newcomer.text.includes("nem küldtél"));
+    assert.ok(!newcomer.text.includes("Pontszámod"));
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+  });
+
+  it("still grades a new participant's reply", async () => {
+    const { deps, delivered } = fakeDeps({
+      recipients: [
+        recipient("c@example.com", null, new Date("2026-10-14T12:00:00Z")),
+      ],
+      fetchReplies: async () =>
+        new Map([["c@example.com", reply("c@example.com")]]),
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+  });
+
+  it("greets recipients by name", async () => {
+    const { deps, delivered } = fakeDeps({
+      recipients: [recipient("a@example.com", "Anna")],
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(delivered[0].mails[0].text.startsWith("Szia Anna!\n\n"));
   });
 
   for (const [now, expected] of [

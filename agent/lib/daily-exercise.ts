@@ -1,5 +1,13 @@
 import type { InboundReply } from "./replies";
 
+export interface Recipient {
+  // Lowercased once normalizeRecipients has run.
+  email: string;
+  name: string | null;
+  // When the participant joined; an exercise sent earlier was not theirs.
+  since: Date;
+}
+
 export interface ExerciseRecord {
   id: number;
   date: string;
@@ -33,7 +41,8 @@ export interface StoredScore extends Grade {
 export type ScoreLine =
   | ({ kind: "graded" } & Grade)
   | { kind: "none" } // no reply arrived
-  | { kind: "unknown" }; // reading or grading the reply failed
+  | { kind: "unknown" } // reading or grading the reply failed
+  | { kind: "new" }; // joined after the previous exercise was sent
 
 export interface OutgoingMail {
   to: string;
@@ -47,7 +56,7 @@ export type DeliveryResult = "sent" | "already-sent";
 export interface DailyExerciseDeps {
   now: Date;
   devMode: boolean;
-  recipients: string[];
+  recipients: Recipient[];
   getPrevious: () => Promise<ExerciseRecord | null>;
   // The latest reply to `previous` from each recipient, keyed by the
   // lowercased address.
@@ -72,7 +81,8 @@ export interface DailyExerciseDeps {
   warn: (message: string, error: unknown) => void;
 }
 
-export type DailyExerciseResult = DeliveryResult | "skipped-hour";
+export type DailyExerciseResult =
+  DeliveryResult | "skipped-hour" | "no-recipients";
 
 export type Environment = "production" | "development";
 
@@ -122,45 +132,32 @@ export function budapestClock(at: Date): { date: string; hour: number } {
   };
 }
 
-export function parseRecipients(value: string): string[] {
-  // A repeated address would get two emails and two racing grades.
+// Lowercases and trims the addresses, keeps the first of any repeated address
+// and refuses a malformed one: Gmail would refuse it too, rolling back the
+// delivery every day. The database checks the same rules on input.
+export function normalizeRecipients(rows: Recipient[]): Recipient[] {
   const seen = new Set<string>();
-  const recipients = value
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => {
-      const key = item.toLowerCase();
+  const recipients: Recipient[] = [];
 
-      if (!item || seen.has(key)) {
-        return false;
-      }
+  for (const row of rows) {
+    const email = row.email.trim().toLowerCase();
 
-      seen.add(key);
-      return true;
-    });
+    if (seen.has(email)) {
+      continue;
+    }
 
-  if (recipients.length === 0) {
-    throw new Error(
-      "EXERCISE_RECIPIENTS must contain at least one email address.",
-    );
-  }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error(`Malformed participant address: ${email}`);
+    }
 
-  // Gmail refuses a malformed address, which would roll back the delivery
-  // every day; fail before anything is sent instead.
-  const malformed = recipients.filter(
-    (item) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item),
-  );
-
-  if (malformed.length > 0) {
-    throw new Error(
-      `EXERCISE_RECIPIENTS contains malformed addresses: ${malformed.join(", ")}`,
-    );
+    seen.add(email);
+    recipients.push({ ...row, email, name: row.name?.trim() || null });
   }
 
   return recipients;
 }
 
-function describeScore(score: ScoreLine): string {
+function describeScore(score: Exclude<ScoreLine, { kind: "new" }>): string {
   switch (score.kind) {
     case "graded":
       return `Pontszámod: ${score.score}/10\n${score.feedback}`;
@@ -176,9 +173,10 @@ export function composeEmail(
   score: ScoreLine,
   today: Pick<GeneratedExercise, "exercise">,
   date: string,
+  name: string | null = null,
 ): { subject: string; text: string } {
   const [year, month, day] = date.split("-");
-  const sections = ["Szia!"];
+  const sections = [name ? `Szia ${name}!` : "Szia!"];
 
   if (previous) {
     sections.push(
@@ -190,7 +188,10 @@ export function composeEmail(
         `Megoldás: ${previous.solution}`,
       ].join("\n"),
     );
-    sections.push(describeScore(score));
+
+    if (score.kind !== "new") {
+      sections.push(describeScore(score));
+    }
   }
 
   sections.push(["Mai feladat", "-----------", today.exercise].join("\n"));
@@ -233,7 +234,7 @@ async function scorePrevious(
 
   await Promise.all(
     deps.recipients.map(async (recipient) => {
-      const email = recipient.toLowerCase();
+      const email = recipient.email.toLowerCase();
       const reply = replies?.get(email);
       const known = stored.get(email);
 
@@ -241,7 +242,7 @@ async function scorePrevious(
       // the latest, even if the reply has left the inbox or the inbox is
       // unreadable.
       if (known && (!reply || known.replyMessageId === reply.messageId)) {
-        lines.set(recipient, {
+        lines.set(recipient.email, {
           kind: "graded",
           score: known.score,
           feedback: known.feedback,
@@ -250,8 +251,14 @@ async function scorePrevious(
       }
 
       if (!reply) {
+        // An exercise sent before the participant joined was not theirs.
+        if (recipient.since > previous.createdAt) {
+          lines.set(recipient.email, { kind: "new" });
+          return;
+        }
+
         // Without the inbox we cannot tell whether a reply arrived.
-        lines.set(recipient, { kind: replies ? "none" : "unknown" });
+        lines.set(recipient.email, { kind: replies ? "none" : "unknown" });
         return;
       }
 
@@ -261,11 +268,11 @@ async function scorePrevious(
         grade = await deps.grade(previous, reply);
       } catch (error) {
         deps.warn(`[daily-exercise] grading ${email} failed`, error);
-        lines.set(recipient, { kind: "unknown" });
+        lines.set(recipient.email, { kind: "unknown" });
         return;
       }
 
-      lines.set(recipient, { kind: "graded", ...grade });
+      lines.set(recipient.email, { kind: "graded", ...grade });
 
       try {
         await deps.saveScore(previous.id, email, reply, grade);
@@ -298,6 +305,11 @@ export async function runDailyExercise(
     return "already-sent";
   }
 
+  // An empty list pauses the emails: no exercise is generated or stored.
+  if (deps.recipients.length === 0) {
+    return "no-recipients";
+  }
+
   // Scoring and generating are independent, so they share one time window.
   // Waiting for both keeps a failed generation from leaving grading running.
   const [scoring, generation] = await Promise.allSettled([
@@ -326,13 +338,14 @@ export async function runDailyExercise(
 
   return deps.deliver({ ...today, slot, date: clock.date }, (exerciseId) =>
     deps.recipients.map((recipient) => ({
-      to: recipient,
+      to: recipient.email,
       messageId: deps.newMessageId(exerciseId),
       ...composeEmail(
         previous,
-        scores.get(recipient) ?? { kind: "unknown" },
+        scores.get(recipient.email) ?? { kind: "unknown" },
         today,
         clock.date,
+        recipient.name,
       ),
     })),
   );

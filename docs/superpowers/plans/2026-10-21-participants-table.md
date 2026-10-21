@@ -18,6 +18,10 @@ Előzmény: `docs/superpowers/plans/2026-10-20-reply-scoring.md` (a jelenlegi k�
 - Az auto mode a `npx prisma migrate deploy`-t éles deploynak minősíti, ezért azt **a felhasználó futtatja** (4. task).
 - A jelenlegi tesztszám 60 (`tests/daily-exercise.test.ts`: 42, `tests/replies.test.ts`: 18).
 
+**Végrehajtás közbeni módosítások** (ahol eltér, a repó kódja a mérvadó):
+
+- **Task 1:** a formátum-CHECK a `[^[:space:]@]` helyett a JavaScript `\s` készletét írja ki (`[^@\t\n\v\f\r    -     　﻿]`); a komment a valódi okokat adja meg; a nézet fölött figyelmeztetés, hogy egy rögzített oszlop típusváltása előtt a nézetet el kell dobni. PGlite-on igazolva: 92 mintán nincs eltérés a JS-szabálytól.
+
 **Git:** a munka a `feature/participants-table` ágon folyik. Taskonként csak a felsorolt fájlokat add hozzá, soha ne `git add -A`-t. A `.env.development.local` tartalmát ne írd ki.
 
 **Typecheck:** a 2. task után a `npx tsc` a `daily-exercise-job.ts`-ben hibát ad (a `parseRecipients` megszűnik); a 3. task végén lesz újra zöld.

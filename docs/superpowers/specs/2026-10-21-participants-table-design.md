@@ -44,7 +44,7 @@ A napi levél címzettjei az `EXERCISE_RECIPIENTS` env változó helyett egy `pa
 Egyedi: `(environment, email)`. A migráció kézzel írt CHECK-megszorításokkal (a Prisma-sémában nem fejezhetők ki, de a Prisma nem is törli őket) biztosítja, hogy:
 
 - az `email` kisbetűs és nincs körülötte szóköz: `email = lower(btrim(email))`;
-- az `email` formátuma érvényes: `email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'` (ugyanaz a szabály, mint a kódban).
+- az `email` formátuma érvényes, ugyanazzal a szabállyal, mint a kód (`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`). Az SQL a JavaScript `\s` szóköz-készletét kifejezetten kiírja (`[^@\t\n\v\f\r    -     　﻿]`), mert a POSIX `[:space:]` kihagy néhány Unicode-szóközt (pl. a bemásolt nem törő szóközt), és a szerver nyelvi beállításától függ.
 
 Az RLS be van kapcsolva, szabályok nélkül, mint a többi táblán. A migráció nem tartalmaz címeket: a sorokat a felhasználó veszi fel.
 

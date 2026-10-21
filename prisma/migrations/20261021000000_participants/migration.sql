@@ -19,28 +19,37 @@ CREATE UNIQUE INDEX "participants_environment_email_key" ON "participants"("envi
 -- a malformed one would stop the daily job. The format rule is the same as
 -- normalizeRecipients': JavaScript's \s is spelled out, because POSIX
 -- [:space:] misses some Unicode spaces (e.g. a pasted no-break space) and
--- depends on the server's locale. Prisma cannot express these checks and
--- leaves them alone.
+-- depends on the server's locale. Only printable ASCII without , ; : < > ( )
+-- [ ] " or \ is allowed: the mailer would read anna,kovacs@gmail.com as
+-- kovacs@gmail.com, and an invisible character would slip past the unique key.
+-- Prisma cannot express these checks and leaves them alone.
 ALTER TABLE "participants"
   ADD CONSTRAINT "participants_email_normalized"
     CHECK ("email" = lower(btrim("email"))),
   ADD CONSTRAINT "participants_email_format"
-    CHECK ("email" ~ '^[^@\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+@[^@\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+\.[^@\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+$');
+    CHECK ("email" ~ '^[^@\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+@[^@\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+\.[^@\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+$'),
+  ADD CONSTRAINT "participants_email_chars"
+    CHECK ("email" ~ '^[!-~]+$' AND "email" !~ '[,;:<>()\[\]"\\]');
 
 -- Same as the other tables: with RLS on and no policies, only the database
 -- owner (Prisma) can read or write the table through Supabase's REST API.
 ALTER TABLE "participants" ENABLE ROW LEVEL SECURITY;
 
--- Switching a participant back on restarts active_since: an exercise sent
--- while they were off was not theirs, so their next email must not say they
--- sent no solution. Prisma cannot express triggers and leaves them alone; a
--- later migration that drops or renames active_since must update this one.
+-- Switching a participant back on, or moving an active one to another
+-- environment or address, restarts active_since: an exercise sent before was
+-- not theirs, so their next email must not say they sent no solution. Prisma
+-- cannot express triggers and leaves them alone; a later migration that drops
+-- or renames active_since must update this one.
 CREATE FUNCTION "participants_restart_active_since"() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = ''
 AS $$
 BEGIN
-  IF NEW."active" AND NOT OLD."active" THEN
+  IF NEW."active" AND (
+    NOT OLD."active"
+    OR NEW."environment" <> OLD."environment"
+    OR NEW."email" <> OLD."email"
+  ) THEN
     NEW."active_since" := CURRENT_TIMESTAMP;
   END IF;
 
@@ -49,7 +58,7 @@ END;
 $$;
 
 CREATE TRIGGER "participants_restart_active_since"
-BEFORE UPDATE OF "active" ON "participants"
+BEFORE UPDATE OF "active", "environment", "email" ON "participants"
 FOR EACH ROW EXECUTE FUNCTION "participants_restart_active_since"();
 
 -- Points per participant, computed from the graded replies. security_invoker

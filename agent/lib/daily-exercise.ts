@@ -148,7 +148,11 @@ export function normalizeRecipients(rows: Recipient[]): Recipient[] {
       continue;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    // Printable ASCII only, and none of the characters the mailer would read
+    // as an address separator or a display name (the database checks the same).
+    const sendable = /^[!-~]+$/.test(email) && !/[,;:<>()[\]"\\]/.test(email);
+
+    if (!sendable || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new Error(`Malformed participant address: ${email}`);
     }
 

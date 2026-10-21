@@ -179,6 +179,22 @@ describe("normalizeRecipients", () => {
     );
   });
 
+  it("rejects addresses the mailer would read differently", () => {
+    for (const email of [
+      "anna,kovacs@gmail.com",
+      "anna;kovacs@gmail.com",
+      "a<b@x.hu>",
+      "c@x.hu​",
+      "ánna@example.com",
+    ]) {
+      assert.throws(
+        () => normalizeRecipients([recipient(email)]),
+        /Malformed participant address/,
+        email,
+      );
+    }
+  });
+
   it("accepts an empty list", () => {
     assert.deepEqual(normalizeRecipients([]), []);
   });

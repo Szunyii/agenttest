@@ -132,9 +132,10 @@ export function budapestClock(at: Date): { date: string; hour: number } {
   };
 }
 
-// Lowercases and trims the addresses, keeps the first of any repeated address
-// and refuses a malformed one: Gmail would refuse it too, rolling back the
-// delivery every day. The database checks the same rules on input.
+// Lowercases and trims the addresses, collapses whitespace in the names, keeps
+// the first of any repeated address and refuses a malformed one: Gmail would
+// refuse it too, rolling back the delivery every day. The database checks the
+// same rules on input.
 export function normalizeRecipients(rows: Recipient[]): Recipient[] {
   const seen = new Set<string>();
   const recipients: Recipient[] = [];
@@ -151,7 +152,11 @@ export function normalizeRecipients(rows: Recipient[]): Recipient[] {
     }
 
     seen.add(email);
-    recipients.push({ ...row, email, name: row.name?.trim() || null });
+    recipients.push({
+      ...row,
+      email,
+      name: row.name?.replace(/\s+/g, " ").trim() || null,
+    });
   }
 
   return recipients;

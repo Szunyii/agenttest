@@ -160,6 +160,14 @@ describe("normalizeRecipients", () => {
     );
   });
 
+  it("collapses whitespace inside a name", () => {
+    assert.equal(
+      normalizeRecipients([recipient("a@example.com", " Anna\n Mária ")])[0]
+        .name,
+      "Anna Mária",
+    );
+  });
+
   it("rejects a malformed address before anything is sent", () => {
     assert.throws(
       () =>
@@ -294,6 +302,7 @@ describe("composeEmail", () => {
     assert.ok(!mail.text.includes("Pontszámod"));
     assert.ok(!mail.text.includes("nem küldtél"));
     assert.ok(!mail.text.includes("nem sikerült"));
+    assert.ok(!mail.text.includes("\n\n\n"));
   });
 });
 
@@ -615,6 +624,58 @@ describe("runDailyExercise", () => {
     await runDailyExercise(deps);
 
     assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+  });
+
+  it("keeps a stored score for a new participant", async () => {
+    const { deps, delivered } = fakeDeps({
+      recipients: [
+        recipient("c@example.com", null, new Date("2026-10-14T12:00:00Z")),
+      ],
+      fetchReplies: async () => new Map(),
+      getScores: async () =>
+        new Map([
+          [
+            "c@example.com",
+            {
+              replyMessageId: "<reply-c@example.com>",
+              score: 5,
+              feedback: "Régi értékelés.",
+            },
+          ],
+        ]),
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 5/10"));
+  });
+
+  it("does not report an unreadable inbox to a new participant", async () => {
+    const { deps, delivered } = fakeDeps({
+      recipients: [
+        recipient("c@example.com", null, new Date("2026-10-14T12:00:00Z")),
+      ],
+      fetchReplies: async () => {
+        throw new Error("IMAP down");
+      },
+    });
+
+    await runDailyExercise(deps);
+
+    const text = delivered[0].mails[0].text;
+
+    assert.ok(text.includes("Megoldás: Előző megoldás"));
+    assert.ok(!text.includes("nem sikerült"));
+    assert.ok(!text.includes("nem küldtél"));
+  });
+
+  it("checks already-sent before the empty list", async () => {
+    const { deps } = fakeDeps({
+      recipients: [],
+      getPrevious: async () => ({ ...previous, date: "2026-10-15" }),
+    });
+
+    assert.equal(await runDailyExercise(deps), "already-sent");
   });
 
   it("greets recipients by name", async () => {

@@ -75,7 +75,9 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
     // An empty production list pauses the emails silently otherwise, e.g.
     // when the participants were added with the wrong environment.
     if (result === "no-recipients" && environment === "production") {
-      console.warn("[daily-exercise] production: no active participants");
+      console.warn(
+        "[daily-exercise] production: no-recipients (no active participants)",
+      );
     } else {
       console.log(`[daily-exercise] ${environment}: ${result}`);
     }

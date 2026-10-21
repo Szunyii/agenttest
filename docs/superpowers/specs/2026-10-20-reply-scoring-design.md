@@ -205,6 +205,6 @@ A válasz tartalma adat, nem utasítás: a rendszerprompt kimondja, hogy a benne
 - Az új migrációt a felhasználó futtatja: `npx prisma migrate deploy` (a dev és az éles környezet ugyanazt az adatbázist használja).
 - A Gmail-fiókban az IMAP-hozzáférés legyen engedélyezve (Beállítások → Továbbítás és POP/IMAP), ha a felület ezt a kapcsolót mutatja.
 
-## Nyitott pont
+## Nyitott pont (lezárva, 2026-10-21)
 
-A Gmail SMTP megtartja-e a kliens által megadott Message-ID-t. Ha a helyi próbán kiderül, hogy lecseréli, a párosítás a tárgysor alapján történik: `Re:` + `Napi matekfeladat – <dátum>`, a feladó címével együtt, az előző feladat dátumára.
+A Gmail SMTP megtartja a kliens által megadott Message-ID-t. Helyi próba: a #4-es dev feladat levelére az iCloudról küldött válasz a következő futásban párosult (`In-Reply-To` a saját azonosítóra mutatott), pontozódott és elmentődött. A tárgysoros tartalék párosításra nincs szükség.

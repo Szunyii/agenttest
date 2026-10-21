@@ -46,3 +46,16 @@ model Submission {
   @@unique([exerciseId, email])
   @@map("submissions")
 }
+
+model Participant {
+  id          Int         @id @default(autoincrement())
+  environment Environment
+  // Lowercased; the migration also checks the format.
+  email       String
+  name        String?
+  active      Boolean     @default(true)
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@unique([environment, email])
+  @@map("participants")
+}

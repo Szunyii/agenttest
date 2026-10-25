@@ -260,4 +260,65 @@ describe("selectImages", () => {
     assert.deepEqual(images, []);
     assert.deepEqual(skipped, none);
   });
+
+  // Just the header bytes each format keeps its size in.
+  const png = (width: number, height: number) => {
+    const bytes = Buffer.alloc(24);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    bytes.write("IHDR", 12, "latin1");
+    bytes.writeUInt32BE(width, 16);
+    bytes.writeUInt32BE(height, 20);
+    return bytes;
+  };
+  const jpeg = (width: number, height: number) => {
+    // SOI, an APP0 segment to skip, then the SOF0 frame header.
+    const bytes = Buffer.alloc(31);
+    bytes.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    bytes.set([0xff, 0xc0, 0x00, 0x11, 0x08], 20);
+    bytes.writeUInt16BE(height, 25);
+    bytes.writeUInt16BE(width, 27);
+    return bytes;
+  };
+  const gif = (width: number, height: number) => {
+    const bytes = Buffer.alloc(10);
+    bytes.write("GIF89a", 0, "latin1");
+    bytes.writeUInt16LE(width, 6);
+    bytes.writeUInt16LE(height, 8);
+    return bytes;
+  };
+
+  it("puts attached files before images embedded in the body", () => {
+    const embedded = (width: number) => ({
+      contentType: "image/png",
+      content: png(width, 100),
+      related: true,
+    });
+    const { images, skipped } = selectImages([
+      embedded(417),
+      embedded(418),
+      embedded(419),
+      { contentType: "image/jpeg", content: jpeg(4032, 3024) },
+    ]);
+
+    assert.deepEqual(
+      images.map((item) => item.mediaType),
+      ["image/jpeg", "image/png", "image/png"],
+    );
+    assert.equal(images[1].base64, png(417, 100).toString("base64"));
+    assert.deepEqual(skipped, { unsupported: 0, tooLarge: 0, surplus: 1 });
+  });
+
+  it("leaves out images over the API's 8000 pixels", () => {
+    const { images, skipped } = selectImages([
+      { contentType: "image/png", content: png(8000, 8000) },
+      { contentType: "image/png", content: png(8001, 10) },
+      { contentType: "image/jpeg", content: jpeg(100, 9000) },
+      { contentType: "image/gif", content: gif(8001, 1) },
+      // An embedded one is a signature's banner, not the student's photo.
+      { contentType: "image/png", content: png(8407, 308), related: true },
+    ]);
+
+    assert.equal(images.length, 1);
+    assert.deepEqual(skipped, { unsupported: 0, tooLarge: 3, surplus: 0 });
+  });
 });

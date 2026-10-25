@@ -134,17 +134,77 @@ const supportedImageTypes = new Set([
 const maxImages = 3;
 const maxImageBase64Chars = 10 * 1024 * 1024;
 const maxTotalBase64Chars = 24 * 1024 * 1024;
+// The API refuses the whole request over an image with a longer side.
+const maxImageSide = 8000;
 
-// The image attachments Claude can read, in order, and why the others were
-// left out; attachments that are not images are ignored.
+// The width and height of a PNG, GIF or JPEG image, from its header. WebP and
+// unreadable headers give null and are left to the API: a refused image still
+// triggers the grader's text-only retry.
+function imageSize(
+  content: Uint8Array,
+  mediaType: string,
+): { width: number; height: number } | null {
+  const view = new DataView(
+    content.buffer,
+    content.byteOffset,
+    content.byteLength,
+  );
+  const fits = (end: number) => end <= content.byteLength;
+
+  if (mediaType === "image/png" && fits(24)) {
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+
+  if (mediaType === "image/gif" && fits(10)) {
+    return { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+  }
+
+  if (mediaType === "image/jpeg") {
+    // Walks the segments up to the frame header (SOF0 to SOF15, apart from
+    // the DHT, JPG and DAC markers that share the range).
+    let offset = 2;
+
+    while (fits(offset + 9) && content[offset] === 0xff) {
+      const marker = content[offset + 1];
+
+      if (
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        ![0xc4, 0xc8, 0xcc].includes(marker)
+      ) {
+        return {
+          width: view.getUint16(offset + 7),
+          height: view.getUint16(offset + 5),
+        };
+      }
+
+      offset += 2 + view.getUint16(offset + 2);
+    }
+  }
+
+  return null;
+}
+
+// The image attachments Claude can read and why the others were left out;
+// attachments that are not images are ignored. Attached files come first, in
+// order, then the images embedded in the body (`related`): those are often a
+// signature's logos, which would take the places of the solution's photo.
 export function selectImages(
-  attachments: Array<{ contentType: string; content: Uint8Array }>,
+  attachments: Array<{
+    contentType: string;
+    content: Uint8Array;
+    related?: boolean;
+  }>,
 ): { images: ReplyImage[]; skipped: ImageSkips } {
   const images: ReplyImage[] = [];
   const skipped: ImageSkips = { unsupported: 0, tooLarge: 0, surplus: 0 };
   let totalChars = 0;
+  const ordered = [
+    ...attachments.filter((attachment) => !attachment.related),
+    ...attachments.filter((attachment) => attachment.related),
+  ];
 
-  for (const attachment of attachments) {
+  for (const attachment of ordered) {
     const mediaType = attachment.contentType.toLowerCase();
 
     if (!mediaType.startsWith("image/")) {
@@ -153,6 +213,18 @@ export function selectImages(
 
     if (!supportedImageTypes.has(mediaType)) {
       skipped.unsupported += 1;
+      continue;
+    }
+
+    const size = imageSize(attachment.content, mediaType);
+
+    if (size && Math.max(size.width, size.height) > maxImageSide) {
+      // An embedded one is a banner, such as a signature's, not a photo of
+      // the solution, so the student is not asked for a smaller one.
+      if (!attachment.related) {
+        skipped.tooLarge += 1;
+      }
+
       continue;
     }
 

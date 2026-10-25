@@ -54,16 +54,20 @@ export interface OutgoingMail {
 
 export type DeliveryResult = "sent" | "already-sent";
 
+export interface FetchedReplies {
+  // The latest reply to the exercise from each recipient, keyed by the
+  // lowercased address.
+  replies: Map<string, InboundReply>;
+  // Recipients whose reply arrived but could not be downloaded.
+  unread: Set<string>;
+}
+
 export interface DailyExerciseDeps {
   now: Date;
   devMode: boolean;
   recipients: Recipient[];
   getPrevious: () => Promise<ExerciseRecord | null>;
-  // The latest reply to `previous` from each recipient, keyed by the
-  // lowercased address.
-  fetchReplies: (
-    previous: ExerciseRecord,
-  ) => Promise<Map<string, InboundReply>>;
+  fetchReplies: (previous: ExerciseRecord) => Promise<FetchedReplies>;
   // Stored scores of an exercise, keyed by the lowercased address.
   getScores: (exerciseId: number) => Promise<Map<string, StoredScore>>;
   grade: (previous: ExerciseRecord, reply: InboundReply) => Promise<Grade>;
@@ -236,7 +240,7 @@ async function scorePrevious(
     deps.warn("[daily-exercise] loading scores failed", loaded.reason);
   }
 
-  const replies = fetched.status === "fulfilled" ? fetched.value : null;
+  const inbox = fetched.status === "fulfilled" ? fetched.value : null;
   const stored =
     loaded.status === "fulfilled"
       ? loaded.value
@@ -245,7 +249,7 @@ async function scorePrevious(
   await Promise.all(
     deps.recipients.map(async (recipient) => {
       const email = recipient.email.toLowerCase();
-      const reply = replies?.get(email);
+      const reply = inbox?.replies.get(email);
       const known = stored.get(email);
 
       // A rerun keeps an earlier run's score unless a different reply is now
@@ -267,8 +271,11 @@ async function scorePrevious(
           return;
         }
 
-        // Without the inbox we cannot tell whether a reply arrived.
-        lines.set(recipient.email, { kind: replies ? "none" : "unknown" });
+        // Without the inbox, or the reply itself, we cannot tell whether it
+        // answers the exercise.
+        const unknown = !inbox || inbox.unread.has(email);
+
+        lines.set(recipient.email, { kind: unknown ? "unknown" : "none" });
         return;
       }
 

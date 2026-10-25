@@ -54,10 +54,16 @@ export async function runDailyExerciseJob(): Promise<DailyExerciseResult> {
           recipients: emails,
         };
 
-        return selectReplies(
-          await readReplies(credentials, previous.createdAt, target),
+        const { replies, unread } = await readReplies(
+          credentials,
+          previous.createdAt,
           target,
         );
+
+        return {
+          replies: selectReplies(replies, target),
+          unread: new Set(unread),
+        };
       },
       getScores: repository.getScores,
       grade: gradeAnswer,

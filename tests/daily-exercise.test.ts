@@ -9,6 +9,7 @@ import {
   runDailyExercise,
   type DailyExerciseDeps,
   type ExerciseRecord,
+  type FetchedReplies,
   type Grade,
   type NewExerciseRecord,
   type OutgoingMail,
@@ -55,6 +56,17 @@ function reply(from: string): InboundReply {
   };
 }
 
+// The given replies, all downloaded but those whose senders are listed unread.
+function fetched(
+  replies: InboundReply[],
+  unread: string[] = [],
+): FetchedReplies {
+  return {
+    replies: new Map(replies.map((item) => [item.from, item])),
+    unread: new Set(unread),
+  };
+}
+
 function fakeDeps(overrides: Partial<DailyExerciseDeps> = {}) {
   const calls: string[] = [];
   const delivered: Array<{ record: NewExerciseRecord; mails: OutgoingMail[] }> =
@@ -72,7 +84,7 @@ function fakeDeps(overrides: Partial<DailyExerciseDeps> = {}) {
     },
     fetchReplies: async () => {
       calls.push("fetchReplies");
-      return new Map([["a@example.com", reply("a@example.com")]]);
+      return fetched([reply("a@example.com")]);
     },
     getScores: async () => {
       calls.push("getScores");
@@ -438,10 +450,7 @@ describe("runDailyExercise", () => {
   it("marks only the failed grade as unknown", async () => {
     const { deps, delivered, saved, warnings } = fakeDeps({
       fetchReplies: async () =>
-        new Map([
-          ["a@example.com", reply("a@example.com")],
-          ["b@example.com", reply("b@example.com")],
-        ]),
+        fetched([reply("a@example.com"), reply("b@example.com")]),
       grade: async (_previous, answer) => {
         if (answer.from === "b@example.com") {
           throw new Error("Claude down");
@@ -465,6 +474,43 @@ describe("runDailyExercise", () => {
     assert.deepEqual(warnings, [
       "[daily-exercise] grading b@example.com failed",
     ]);
+  });
+
+  it("marks only a reply that could not be downloaded as unknown", async () => {
+    const { deps, calls, delivered } = fakeDeps({
+      fetchReplies: async () =>
+        fetched([reply("a@example.com")], ["b@example.com"]),
+    });
+
+    assert.equal(await runDailyExercise(deps), "sent");
+    assert.ok(!calls.includes("grade:b@example.com"));
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 8/10"));
+    assert.ok(
+      delivered[0].mails[1].text.includes(
+        "A pontszámot most nem sikerült megállapítani.",
+      ),
+    );
+  });
+
+  it("keeps a stored score for a reply that could not be downloaded", async () => {
+    const { deps, delivered } = fakeDeps({
+      fetchReplies: async () => fetched([], ["a@example.com"]),
+      getScores: async () =>
+        new Map([
+          [
+            "a@example.com",
+            {
+              replyMessageId: "<reply-a@example.com>",
+              score: 5,
+              feedback: "Régi értékelés.",
+            },
+          ],
+        ]),
+    });
+
+    await runDailyExercise(deps);
+
+    assert.ok(delivered[0].mails[0].text.includes("Pontszámod: 5/10"));
   });
 
   it("still uses a grade whose saving failed", async () => {
@@ -497,7 +543,7 @@ describe("runDailyExercise", () => {
 
   it("keeps a stored score when the reply has left the inbox", async () => {
     const { deps, calls, delivered } = fakeDeps({
-      fetchReplies: async () => new Map(),
+      fetchReplies: async () => fetched([]),
       getScores: async () =>
         new Map([
           [
@@ -633,8 +679,7 @@ describe("runDailyExercise", () => {
       recipients: [
         recipient("c@example.com", null, new Date("2026-10-14T12:00:00Z")),
       ],
-      fetchReplies: async () =>
-        new Map([["c@example.com", reply("c@example.com")]]),
+      fetchReplies: async () => fetched([reply("c@example.com")]),
     });
 
     await runDailyExercise(deps);
@@ -647,7 +692,7 @@ describe("runDailyExercise", () => {
       recipients: [
         recipient("c@example.com", null, new Date("2026-10-14T12:00:00Z")),
       ],
-      fetchReplies: async () => new Map(),
+      fetchReplies: async () => fetched([]),
       getScores: async () =>
         new Map([
           [

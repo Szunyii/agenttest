@@ -11,9 +11,17 @@ import {
 } from "./replies";
 
 // Bounds the whole read, logout included, so a stalled IMAP server cannot eat
-// the job's budget.
-const readTimeoutMs = 30_000;
+// the job's budget. Gmail serves the replies slowly: six of them, two with
+// phone photos, took 12 to over 30 s to download.
+const readTimeoutMs = 75_000;
 const dayMs = 24 * 60 * 60 * 1000;
+
+export interface InboxRead {
+  replies: InboundReply[];
+  // Lowercased senders whose reply was found but not downloaded, e.g. when
+  // the time ran out.
+  unread: string[];
+}
 
 // Reads the newest reply of each recipient to our emails about the target
 // exercise, from mail received since about `since`. The mailbox is opened
@@ -22,7 +30,7 @@ export async function readReplies(
   credentials: MailCredentials,
   since: Date,
   target: ReplyTarget,
-): Promise<InboundReply[]> {
+): Promise<InboxRead> {
   try {
     return await readInbox(credentials, since, target);
   } catch (error) {
@@ -34,7 +42,7 @@ async function readInbox(
   credentials: MailCredentials,
   since: Date,
   target: ReplyTarget,
-): Promise<InboundReply[]> {
+): Promise<InboxRead> {
   const client = new ImapFlow({
     host: "imap.gmail.com",
     port: 993,
@@ -70,16 +78,27 @@ async function readInbox(
           uid: true,
           envelope: true,
           internalDate: true,
+          size: true,
           headers: ["references", "auto-submitted"],
         },
       );
+
+      // Once the connection is closed, imapflow returns empty results instead
+      // of failing; a cut-short search must not look like "no replies".
+      if (timedOut || !client.usable) {
+        throw new Error("connection lost");
+      }
+
       // Download only the newest human reply of each recipient to this
       // exercise, so earlier attempts cannot eat the time budget;
       // selectReplies makes the same choice from the parsed mail.
       const recipients = new Set(
         target.recipients.map((recipient) => recipient.toLowerCase()),
       );
-      const newest = new Map<string, { uid: number; receivedAt: Date }>();
+      const newest = new Map<
+        string,
+        { uid: number; receivedAt: Date; size: number }
+      >();
 
       for (const message of messages) {
         const from = (message.envelope?.from?.[0]?.address ?? "").toLowerCase();
@@ -98,33 +117,60 @@ async function readInbox(
         const current = newest.get(from);
 
         if (!current || receivedAt >= current.receivedAt) {
-          newest.set(from, { uid: message.uid, receivedAt });
+          newest.set(from, {
+            uid: message.uid,
+            receivedAt,
+            size: message.size ?? 0,
+          });
         }
       }
 
       const replies: InboundReply[] = [];
+      const unread: string[] = [];
+      let failure: string | undefined;
+      // The smallest first, so a slow photo cannot keep the text-only replies
+      // from being graded.
+      const queue = [...newest].sort(([, a], [, b]) => a.size - b.size);
 
-      for (const { uid, receivedAt } of newest.values()) {
-        const full = await client.fetchOne(
-          String(uid),
-          { source: true },
-          { uid: true },
-        );
+      for (const [from, { uid, receivedAt }] of queue) {
+        try {
+          if (timedOut || !client.usable) {
+            throw new Error("connection lost");
+          }
 
-        // `false` means the message was deleted meanwhile; a lost connection
-        // is caught below.
-        if (full && full.source) {
-          replies.push(await parseReply(full.source, receivedAt, uid));
+          const full = await client.fetchOne(
+            String(uid),
+            { source: true },
+            { uid: true },
+          );
+
+          // As above, a closed connection returns an empty result.
+          if (timedOut || !client.usable) {
+            throw new Error("connection lost");
+          }
+
+          // `false` means the message was deleted meanwhile.
+          if (full && full.source) {
+            replies.push(await parseReply(full.source, receivedAt, uid));
+          }
+        } catch (error) {
+          // Only this sender's score is lost; the rest may still be read.
+          unread.push(from);
+          failure ??= timedOut
+            ? "read timed out"
+            : describeImapError(error).message;
         }
       }
 
-      // Once the connection is closed, imapflow returns empty results instead
-      // of failing; a cut-short read must not look like "no replies".
-      if (timedOut || !client.usable) {
-        throw new Error("connection lost");
+      if (failure) {
+        // A count, never the addresses.
+        console.warn(
+          `[inbox] ${unread.length} of ${queue.length} replies not downloaded:`,
+          failure,
+        );
       }
 
-      return replies;
+      return { replies, unread };
     } finally {
       lock.release();
     }

@@ -7,11 +7,11 @@ import type { ExerciseRecord, Grade } from "./daily-exercise";
 import type { ImageSkips, InboundReply, ReplyImage } from "./replies";
 
 const model = "claude-sonnet-5-5";
-// Grading runs alongside generation (120 s) after the IMAP read (30 s), so
+// Grading runs alongside generation (120 s) after the IMAP read (75 s), so
 // both branches end within about 120 s, before the 110 s delivery
 // transaction: the job stays under Vercel's 300 s. The deadline also covers
-// the text-only retry.
-const gradingTimeoutMs = 90_000;
+// the text-only retry; six parallel grades took about 5 s.
+const gradingTimeoutMs = 45_000;
 // The reply is untrusted text; a huge one would only overflow the prompt.
 const maxReplyChars = 20_000;
 

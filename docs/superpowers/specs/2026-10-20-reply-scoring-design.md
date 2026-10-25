@@ -62,9 +62,9 @@ Egy válasz akkor tartozik az előző feladathoz, ha az `In-Reply-To` vagy a `Re
 |---|---|
 | `prisma/schema.prisma` | módosul: `Submission` modell, `submissions` reláció a `DailyExercise`-on |
 | `prisma/migrations/` | *új* migráció: a `submissions` tábla és az RLS |
-| `agent/lib/inbox.ts` | *új*: `readReplies(credentials, since, target)` → `InboundReply[]`. `imapflow`-val olvassa az INBOX-ot, a leveleket nem jelöli olvasottnak; címzettenként csak a legújabb, az adott feladatra (és környezetre) hivatkozó, nem automatikus választ tölti le, így a dev futás nem olvassa az éles válaszokat; `mailparser`-rel kinyeri a szöveget és a képmellékleteket; 30 mp-es időkorlát; egy félbeszakadt olvasás hibát ad, nem üres listát; a hibaüzenet tartalmazza az IMAP-kódot (pl. `AUTHENTICATIONFAILED`) |
+| `agent/lib/inbox.ts` | *új*: `readReplies(credentials, since, target)` → `{ replies, unread }`. `imapflow`-val olvassa az INBOX-ot, a leveleket nem jelöli olvasottnak; címzettenként csak a legújabb, az adott feladatra (és környezetre) hivatkozó, nem automatikus választ tölti le, így a dev futás nem olvassa az éles válaszokat; `mailparser`-rel kinyeri a szöveget és a képmellékleteket; 75 mp-es időkorlát (a Gmail lassan adja a fotós leveleket: hat válasz letöltése 12 és 30+ mp között ingadozott); a válaszokat a legkisebbtől kezdve tölti le, és ha a letöltés közben lejár az idő vagy egy levél nem olvasható, a már letöltöttek megmaradnak, a többi feladója az `unread` listába kerül; a keresés közben félbeszakadt olvasás hibát ad, nem üres listát; a hibaüzenet tartalmazza az IMAP-kódot (pl. `AUTHENTICATIONFAILED`) |
 | `agent/lib/replies.ts` | *új*, tiszta függvények (egy modulban, mert a `node --test` csak kiterjesztés nélküli relatív import nélküli modult tud betölteni): `buildMessageId(environment, exerciseId)`, `parseMessageIds(headerValues)`, `answersExercise(references, exercise)`, `isAutoReply(headerText)`, `selectReplies(replies, { environment, exerciseId, recipients })` → címzettenként a legutolsó érvényes válasz, `selectImages(attachments)` → a küldhető képek és a kimaradtak oka szerint |
-| `agent/lib/grader.ts` | *új*: `gradeAnswer(exercise, reply)` → `{ score, feedback }`; Claude (`claude-sonnet-5-5`) strukturált kimenettel, a képek fájlrészként, 90 mp-es időkorlát (a kép nélküli újrapróbálással együtt) |
+| `agent/lib/grader.ts` | *új*: `gradeAnswer(exercise, reply)` → `{ score, feedback }`; Claude (`claude-sonnet-5-5`) strukturált kimenettel, a képek fájlrészként, 45 mp-es időkorlát (a kép nélküli újrapróbálással együtt; hat párhuzamos pontozás kb. 5 mp) |
 | `agent/lib/daily-exercise.ts` | módosul: a `composeEmail` személyre szabott, pontszám-sorral; a `runDailyExercise` vezérli a beolvasást, a pontozást és a címzettenkénti leveleket |
 | `agent/lib/exercise-repository.ts` | módosul: a `getPrevious` visszaadja az `id`-t és a `createdAt`-et; új `getScores(exerciseId)` és `saveScore(...)`; a `deliver` a tranzakcióban több levelet küld |
 | `agent/lib/mailer.ts` | módosul: `sendMails(credentials, mails, signal)` → egy kapcsolaton küld több levelet, `To:` és saját `messageId` mezővel; a határidő után nem indít újat |
@@ -101,7 +101,10 @@ interface DailyExerciseDeps {
   devMode: boolean;
   recipients: string[];
   getPrevious(): Promise<ExerciseRecord | null>;
-  fetchReplies(previous: ExerciseRecord): Promise<Map<string, InboundReply>>; // kisbetűs cím szerint
+  fetchReplies(previous: ExerciseRecord): Promise<{
+    replies: Map<string, InboundReply>;  // kisbetűs cím szerint
+    unread: Set<string>;                 // akiknek a válasza nem töltődött le
+  }>;
   getScores(exerciseId: number): Promise<Map<string, StoredScore>>;           // kisbetűs cím szerint
   grade(previous: ExerciseRecord, reply: InboundReply): Promise<Grade>;
   saveScore(exerciseId: number, email: string, reply: InboundReply, grade: Grade): Promise<void>;
@@ -123,10 +126,10 @@ A `deliver` a beszúrás után kapja meg a mai feladat azonosítóját, és ebb�
    - **Generálás:** `generate()`.
 
    Előző feladat nélkül csak a generálás fut.
-4. Címzettenként előáll a `ScoreLine`: `graded` (van pont), `none` (nem érkezett válasz), `unknown` (az IMAP vagy az adott pontozás elbukott).
+4. Címzettenként előáll a `ScoreLine`: `graded` (van pont), `none` (nem érkezett válasz), `unknown` (az IMAP, az adott válasz letöltése vagy pontozása elbukott).
 5. `deliver`: a mai feladat beszúrása és az összes levél elküldése egy tranzakcióban, egyetlen SMTP-kapcsolaton.
 
-Időkeret (Vercel max. 300 mp): az IMAP (legfeljebb 30 mp, a tárolt pontok betöltésével párhuzamosan) és utána a pontozás (legfeljebb 90 mp) a generálással (legfeljebb 120 mp) párhuzamosan fut, így ez a szakasz kb. 120 mp; a tranzakció 2 perc alatt (a Supabase utasításkorlátja alatt). A levélküldés időkorlátjait úgy kell beállítani, hogy a legrosszabb eset kevés (legfeljebb 5) címzettnél is beférjen a tranzakció időkorlátjába; ennél több címzettnél újra kell számolni.
+Időkeret (Vercel max. 300 mp): az IMAP (legfeljebb 75 mp, a tárolt pontok betöltésével párhuzamosan) és utána a pontozás (legfeljebb 45 mp) a generálással (legfeljebb 120 mp) párhuzamosan fut, így ez a szakasz kb. 120 mp; a tranzakció 2 perc alatt (a Supabase utasításkorlátja alatt). A levélküldés időkorlátjait úgy kell beállítani, hogy a legrosszabb eset kevés (legfeljebb 5) címzettnél is beférjen a tranzakció időkorlátjába; ennél több címzettnél újra kell számolni.
 
 ## A levél
 
@@ -159,7 +162,7 @@ A tárgy nem változik: `Napi matekfeladat – 2026. 10. 21.`
 
 ## Pontozás
 
-Bemenet: a feladat, a referencia-megoldás, a válasz szövege (legfeljebb 20 000 karakter) és legfeljebb 3 kép (JPEG, PNG, GIF vagy WebP; base64-ben egyenként legfeljebb 10 MB, együtt legfeljebb 24 MB, a Claude API közvetlen korlátai alatt). Ami kimarad, annak okát a pontozó megkapja, és az indoklás ehhez illő tanácsot ad: más formátum (pl. HEIC) → JPEG vagy PNG; túl nagy → kisebb fotó (pl. az iPhone Mail „Nagy” vagy „Közepes” mérete); háromnál több → csak az első három számít. A kimaradt képek számát (tartalom nélkül) a log is rögzíti. Ha az API egy átengedett képet mégis visszautasít (400), a pontozó kép nélkül, a szöveg alapján próbálja újra. Ha a válasz csak azért nem értékelhető, mert a képei kimaradtak, 0 pontot kap, és az indoklás megmondja, mit küldjön helyette.
+Bemenet: a feladat, a referencia-megoldás, a válasz szövege (legfeljebb 20 000 karakter) és legfeljebb 3 kép (JPEG, PNG, GIF vagy WebP; base64-ben egyenként legfeljebb 10 MB, együtt legfeljebb 24 MB, és egyik oldaluk sem hosszabb 8000 képpontnál, a Claude API közvetlen korlátai alatt). A csatolt fájlok a levéltörzsbe ágyazott képek (`related`) elé kerülnek: az Outlookos aláírás 4–6 beágyazott logója különben elvette a megoldásfotó helyét. A 8000 képpontnál hosszabb beágyazott kép (pl. aláírásbanner) jelzés nélkül kimarad, a csatolt „túl nagy”-nak számít; a PNG, GIF és JPEG méretét a fejlécből olvassuk, a WebP-ét nem. Ami kimarad, annak okát a pontozó megkapja, és az indoklás ehhez illő tanácsot ad: más formátum (pl. HEIC) → JPEG vagy PNG; túl nagy → kisebb fotó (pl. az iPhone Mail „Nagy” vagy „Közepes” mérete); háromnál több → csak az első három számít. A kimaradt képek számát (tartalom nélkül) a log is rögzíti. Ha az API egy átengedett képet mégis visszautasít (400), a pontozó kép nélkül, a szöveg alapján próbálja újra. Ha a válasz csak azért nem értékelhető, mert a képei kimaradtak, 0 pontot kap, és az indoklás megmondja, mit küldjön helyette.
 
 Szempontok:
 
@@ -178,7 +181,8 @@ A válasz tartalma adat, nem utasítás: a rendszerprompt kimondja, hogy a benne
 
 | Hiba | Következmény |
 |---|---|
-| Az IMAP nem érhető el, hibás a bejelentkezés, vagy lejár az időkorlát | Figyelmeztetés a logban; minden címzett `unknown` sort kap, kivéve akinek egy korábbi futás már elmentette a pontszámát; a levelek kimennek |
+| Az IMAP nem érhető el, hibás a bejelentkezés, vagy a keresés közben lejár az időkorlát | Figyelmeztetés a logban; minden címzett `unknown` sort kap, kivéve akinek egy korábbi futás már elmentette a pontszámát; a levelek kimennek |
+| A letöltés közben lejár az időkorlát, vagy egy válasz nem tölthető le | Egy figyelmeztetés a logban (darabszám és ok, címek nélkül); a letöltött válaszokat pontozzuk, a le nem töltöttek feladói `unknown` sort kapnak (vagy a korábban elmentett pontszámukat) |
 | Egy válasz pontozása elbukik | Az adott címzett `unknown` sort kap, a többiek nem érintettek |
 | Az API visszautasítja a képeket (400) | Figyelmeztetés a logban (csak a hibaüzenet); a pontozó kép nélkül újrapróbálja, az indoklás megemlíti a képet |
 | A `saveScore` elbukik | Figyelmeztetés a logban; a levélben a pontszám ettől még szerepel |
